@@ -1,4 +1,10 @@
-.ideas/
+# IDE files
+.idea/
+*.iml
+
+# Build artifacts
 main
 octollm-server
+
+# Config files
 config.yaml
