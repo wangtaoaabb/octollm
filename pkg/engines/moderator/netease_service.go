@@ -130,13 +130,13 @@ func (s *NeteaseModeratorService) Allow(ctx context.Context, text []rune) error 
 
 		// Block risky content
 		if suggestion == NeteaseSuggestionRisk {
-			logrus.WithContext(ctx).Infof("[NeteaseModeratorService.Allow] content blocked by Netease moderator, suggestion: %s", suggestion)
+			logrus.WithContext(ctx).Infof("[NeteaseModeratorService.Allow] content blocked by Netease moderator, suggestion: %d", suggestion)
 			result, status = ModerationResultBlocked, ModerationRequestSuccess
 			return fmt.Errorf("content blocked by Netease moderator: risk content detected")
 		}
 
 		// Allow content to pass in other cases
-		logrus.WithContext(ctx).Debugf("[NeteaseModeratorService.Allow] content passed moderation, suggestion: %s", suggestion)
+		logrus.WithContext(ctx).Debugf("[NeteaseModeratorService.Allow] content passed moderation, suggestion: %d", suggestion)
 		result, status = ModerationResultAllowed, ModerationRequestSuccess
 		return nil
 	}
