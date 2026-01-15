@@ -190,7 +190,7 @@ func (m *ModelRepoFileBased) BuildEngineByBackend(b *Backend) (octollm.Engine, e
 		oriEngine := llmEngine
 		var convEngine octollm.Engine
 		if b.ConvertToMessages == "from_chat" {
-			convEngine = converter.NewChatCompletionsToClaudeMessages(oriEngine)
+			convEngine = converter.NewChatCompletionToClaudeMessages(oriEngine)
 		}
 		if convEngine != nil {
 			conv := func(req *octollm.Request) (*octollm.Response, error) {

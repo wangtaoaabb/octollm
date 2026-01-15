@@ -25,7 +25,7 @@ func main() {
 	mux.Handle("/v1/chat/completions", octollm.ChatCompletionsHandler(ep))
 
 	// Create a converter to convert OpenAI-compatible API to Claude messages API
-	conv := converter.NewChatCompletionsToClaudeMessages(ep)
+	conv := converter.NewChatCompletionToClaudeMessages(ep)
 	mux.Handle("/v1/messages", octollm.MessagesHandler(conv))
 
 	// Create a rewrite engine to force the model to use kimi-k2-instruct

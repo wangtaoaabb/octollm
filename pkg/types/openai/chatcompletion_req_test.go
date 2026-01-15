@@ -3,111 +3,153 @@ package openai
 import (
 	"encoding/json"
 	"testing"
-
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/packages/param"
-	"github.com/stretchr/testify/assert"
 )
 
-func TestChatCompletionNewParams_MarshalJSON(t *testing.T) {
-	p := ChatCompletionNewParams{
-		ChatCompletionNewParams: openai.ChatCompletionNewParams{
-			Model: openai.ChatModelGPT3_5Turbo,
-			Messages: []openai.ChatCompletionMessageParamUnion{
-				openai.SystemMessage("Hello, I am an assistant."),
-				openai.UserMessage([]openai.ChatCompletionContentPartUnionParam{
-					openai.TextContentPart("Hello, I am a user."),
-					openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
-						URL: "https://example.com/image.jpg",
-					}),
-				}),
-			},
-			Tools: []openai.ChatCompletionToolUnionParam{
-				openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
-					Name:        "get_weather",
-					Description: openai.String("Get weather at the given location"),
-					Parameters: openai.FunctionParameters{
-						"type": "object",
-						"properties": map[string]interface{}{
-							"location": map[string]string{
-								"type": "string",
-							},
-						},
-						"required": []string{"location"},
-					},
-				}),
-			},
-		},
-		Stream: param.NewOpt(false),
-	}
-
-	jsonStr, err := json.Marshal(p)
-	assert.NoError(t, err)
-	// t.Logf("jsonStr: %s", string(jsonStr))
-	assert.JSONEq(t, `{
-		"model":"gpt-3.5-turbo",
-		"messages":[
-			{"role":"system","content":"Hello, I am an assistant."},
-			{"role":"user","content":[
-				{"type":"text","text":"Hello, I am a user."},
-				{"type":"image_url","image_url":{"url":"https://example.com/image.jpg"}}
-			]}
-		],
-		"tools":[{
-			"type":"function",
-			"function":{
-				"name":"get_weather",
-				"description":"Get weather at the given location",
-				"parameters":{
-					"type":"object",
-					"properties":{
-						"location":{"type":"string"}
-					},
-					"required":["location"]
-				}
-			}
-		}],
-		"stream":false
-	}`, string(jsonStr))
-}
-
-func TestChatCompletionNewParams_UnmarshalJSON(t *testing.T) {
-	p := ChatCompletionNewParams{}
-	jStrOriginal := `{
-		"model":"gpt-3.5-turbo",
-		"messages":[
-			{"role":"system","content":"Hello, I am an assistant."},
-			{"role":"user","content":[
-				{"type":"text","text":"Hello, I am a user."},
-				{"type":"image_url","image_url":{"url":"https://example.com/image.jpg"}}
-			]}
-		],
-		"tools":[{
-			"type":"function",
-			"function":{
-				"name":"get_weather",
-				"description":"Get weather at the given location",
-				"parameters":{
-					"type":"object",
-					"properties":{
-						"location":{"type":"string"}
-					},
-					"required":["location"]
-				}
-			}
-		}],
-		"stream":false
+func TestMessage_UnmarshalJSON_String(t *testing.T) {
+	jsonData := `{
+		"role": "user",
+		"content": "Hello, world!"
 	}`
 
-	err := json.Unmarshal([]byte(jStrOriginal), &p)
-	assert.NoError(t, err)
+	var msg Message
+	err := json.Unmarshal([]byte(jsonData), &msg)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
 
-	// spew.Dump(p)
+	if msg.Role != "user" {
+		t.Errorf("Expected role 'user', got '%s'", msg.Role)
+	}
 
-	jsonStr, err := json.Marshal(p)
-	assert.NoError(t, err)
-	// t.Logf("jsonStr: %s", string(jsonStr))
-	assert.JSONEq(t, jStrOriginal, string(jsonStr))
-	assert.True(t, p.Stream.Valid())
-	assert.False(t, p.Stream.Value)
+	contentStr, ok := msg.Content.(MessageContentString)
+	if !ok {
+		t.Fatalf("Expected MessageContentString, got %T", msg.Content)
+	}
+
+	if string(contentStr) != "Hello, world!" {
+		t.Errorf("Expected content 'Hello, world!', got '%s'", contentStr)
+	}
+}
+
+func TestMessage_UnmarshalJSON_Array(t *testing.T) {
+	jsonData := `{
+		"role": "user",
+		"content": [
+			{"type": "text", "text": "Hello"},
+			{"type": "text", "text": " world!"}
+		]
+	}`
+
+	var msg Message
+	err := json.Unmarshal([]byte(jsonData), &msg)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	if msg.Role != "user" {
+		t.Errorf("Expected role 'user', got '%s'", msg.Role)
+	}
+
+	contentArr, ok := msg.Content.(MessageContentArray)
+	if !ok {
+		t.Fatalf("Expected MessageContentArray, got %T", msg.Content)
+	}
+
+	if len(contentArr) != 2 {
+		t.Errorf("Expected 2 items, got %d", len(contentArr))
+	}
+
+	if contentArr[0].Text != "Hello" {
+		t.Errorf("Expected first item text 'Hello', got '%s'", contentArr[0].Text)
+	}
+}
+
+func TestMessage_MarshalJSON_String(t *testing.T) {
+	msg := Message{
+		Role:    "assistant",
+		Content: MessageContentString("Hello, world!"),
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	expected := `{"role":"assistant","content":"Hello, world!"}`
+	var expectedMap, actualMap map[string]interface{}
+	json.Unmarshal([]byte(expected), &expectedMap)
+	json.Unmarshal(data, &actualMap)
+
+	if expectedMap["role"] != actualMap["role"] {
+		t.Errorf("Role mismatch")
+	}
+	if expectedMap["content"] != actualMap["content"] {
+		t.Errorf("Content mismatch: expected '%v', got '%v'", expectedMap["content"], actualMap["content"])
+	}
+}
+
+func TestMessage_MarshalJSON_Array(t *testing.T) {
+	msg := Message{
+		Role: "user",
+		Content: MessageContentArray([]*MessageContentItem{
+			{Type: "text", Text: "Hello"},
+			{Type: "text", Text: " world!"},
+		}),
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	var result map[string]interface{}
+	json.Unmarshal(data, &result)
+
+	if result["role"] != "user" {
+		t.Errorf("Role mismatch")
+	}
+
+	content, ok := result["content"].([]interface{})
+	if !ok {
+		t.Fatalf("Expected content to be array, got %T", result["content"])
+	}
+
+	if len(content) != 2 {
+		t.Errorf("Expected 2 items, got %d", len(content))
+	}
+}
+
+func TestApiChatCompletionsRequest_UnmarshalJSON(t *testing.T) {
+	jsonData := `{
+		"model": "gpt-4",
+		"messages": [
+			{"role": "system", "content": "You are a helpful assistant."},
+			{"role": "user", "content": "Hello!"}
+		],
+		"max_tokens": 100,
+		"temperature": 0.7
+	}`
+
+	var req ChatCompletionRequest
+	err := json.Unmarshal([]byte(jsonData), &req)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	if req.Model != "gpt-4" {
+		t.Errorf("Expected model 'gpt-4', got '%s'", req.Model)
+	}
+
+	if len(req.Messages) != 2 {
+		t.Errorf("Expected 2 messages, got %d", len(req.Messages))
+	}
+
+	if req.Messages[0].Role != "system" {
+		t.Errorf("Expected first message role 'system', got '%s'", req.Messages[0].Role)
+	}
+
+	content := req.Messages[0].Content.(MessageContentString)
+	if string(content) != "You are a helpful assistant." {
+		t.Errorf("Expected content 'You are a helpful assistant.', got '%s'", content)
+	}
 }

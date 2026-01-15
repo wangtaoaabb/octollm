@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/infinigence/octollm/pkg/octollm"
-	"github.com/openai/openai-go/v3"
+	"github.com/infinigence/octollm/pkg/types/openai"
 )
 
 type OpenAIChatCompletionsEndpoint struct {
@@ -33,8 +33,10 @@ func NewOpenAIChatCompletionsEndpoint(baseAddr, endpoint, apiKey string) *OpenAI
 			return httpReq
 		}).
 		WithParser(
-			func(req *octollm.Request) octollm.Parser { return &octollm.JSONParser[openai.ChatCompletion]{} },
-			func(req *octollm.Request) octollm.Parser { return &octollm.JSONParser[openai.ChatCompletionChunk]{} },
+			func(req *octollm.Request) octollm.Parser { return &octollm.JSONParser[openai.ChatCompletionResponse]{} },
+			func(req *octollm.Request) octollm.Parser {
+				return &octollm.JSONParser[openai.ChatCompletionStreamChunk]{}
+			},
 		)
 	return &OpenAIChatCompletionsEndpoint{
 		HTTPEndpoint: httpEndpoint,

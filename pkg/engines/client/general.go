@@ -7,7 +7,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/infinigence/octollm/pkg/octollm"
-	"github.com/openai/openai-go/v3"
+	"github.com/infinigence/octollm/pkg/types/openai"
 )
 
 type GeneralEndpoint struct {
@@ -67,7 +67,7 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 				case octollm.APIFormatClaudeMessages:
 					return &octollm.JSONParser[anthropic.Message]{}
 				default:
-					return &octollm.JSONParser[openai.ChatCompletion]{}
+					return &octollm.JSONParser[openai.ChatCompletionResponse]{}
 				}
 			},
 			func(req *octollm.Request) octollm.Parser {
@@ -75,7 +75,7 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 				case octollm.APIFormatClaudeMessages:
 					return &octollm.JSONParser[anthropic.BetaRawMessageStreamEventUnion]{}
 				default:
-					return &octollm.JSONParser[openai.ChatCompletionChunk]{}
+					return &octollm.JSONParser[openai.ChatCompletionStreamChunk]{}
 				}
 			},
 		)

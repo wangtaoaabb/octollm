@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/infinigence/octollm/pkg/octollm"
-	"github.com/openai/openai-go/v3"
+	"github.com/infinigence/octollm/pkg/types/openai"
 )
 
 type SimpleFeatureExtractor struct {
@@ -21,14 +21,14 @@ func (e *SimpleFeatureExtractor) Features(req *octollm.Request) (map[string]any,
 	}
 
 	switch v := reqBody.(type) {
-	case *openai.ChatCompletionNewParams:
+	case *openai.ChatCompletionRequest:
 		return e.featuresForChatCompletions(v), nil
 	default:
 		return nil, fmt.Errorf("unsupported request body type %T", reqBody)
 	}
 }
 
-func (e *SimpleFeatureExtractor) featuresForChatCompletions(req *openai.ChatCompletionNewParams) map[string]any {
+func (e *SimpleFeatureExtractor) featuresForChatCompletions(req *openai.ChatCompletionRequest) map[string]any {
 	r := make(map[string]any)
 	r["promptTextLen"] = e.featurePromptTextLen(req)
 	for _, l := range e.PrefixHashLen {
@@ -40,46 +40,20 @@ func (e *SimpleFeatureExtractor) featuresForChatCompletions(req *openai.ChatComp
 	return r
 }
 
-func (e *SimpleFeatureExtractor) combinedTextForChatCompletionsMessage(msg *openai.ChatCompletionMessageParamUnion) string {
-	switch v := msg.GetContent().AsAny().(type) {
-	case *string:
-		return *v
-	case *[]openai.ChatCompletionContentPartTextParam:
-		r := ""
-		for _, part := range *v {
-			r += part.Text
-		}
-		return r
-	case *[]openai.ChatCompletionContentPartUnionParam:
-		r := ""
-		for _, part := range *v {
-			t := part.GetText()
-			if t != nil {
-				r += *t
-			}
-		}
-		return r
-	case *[]openai.ChatCompletionAssistantMessageParamContentArrayOfContentPartUnion:
-		r := ""
-		for _, part := range *v {
-			t := part.GetText()
-			if t != nil {
-				r += *t
-			}
-		}
-		return r
-	default:
-		return ""
+func (e *SimpleFeatureExtractor) combinedTextForChatCompletionsMessage(msg *openai.Message) string {
+	if msg.Content != nil {
+		return msg.Content.ExtractText()
 	}
+	return ""
 }
 
-func (e *SimpleFeatureExtractor) featurePrefixHash(req *openai.ChatCompletionNewParams, l int) string {
+func (e *SimpleFeatureExtractor) featurePrefixHash(req *openai.ChatCompletionRequest, l int) string {
 	if len(req.Messages) == 0 {
 		return ""
 	}
-	msg0txt := e.combinedTextForChatCompletionsMessage(&req.Messages[0])
+	msg0txt := e.combinedTextForChatCompletionsMessage(req.Messages[0])
 	msg0txt = strings.TrimSpace(msg0txt)
-	// first 20 runes
+	// first l runes
 	prefix := []rune(msg0txt)
 	if len(prefix) > l {
 		prefix = prefix[:l]
@@ -93,13 +67,13 @@ func (e *SimpleFeatureExtractor) featurePrefixHash(req *openai.ChatCompletionNew
 	return biz
 }
 
-func (e *SimpleFeatureExtractor) featureSuffixHash(req *openai.ChatCompletionNewParams, l int) string {
+func (e *SimpleFeatureExtractor) featureSuffixHash(req *openai.ChatCompletionRequest, l int) string {
 	if len(req.Messages) == 0 {
 		return ""
 	}
-	msg0txt := e.combinedTextForChatCompletionsMessage(&req.Messages[0])
+	msg0txt := e.combinedTextForChatCompletionsMessage(req.Messages[0])
 	msg0txt = strings.TrimSpace(msg0txt)
-	// first 20 runes
+	// last l runes
 	suffix := []rune(msg0txt)
 	if len(suffix) > l {
 		suffix = suffix[len(suffix)-l:]
@@ -113,10 +87,10 @@ func (e *SimpleFeatureExtractor) featureSuffixHash(req *openai.ChatCompletionNew
 	return biz
 }
 
-func (e *SimpleFeatureExtractor) featurePromptTextLen(req *openai.ChatCompletionNewParams) int {
+func (e *SimpleFeatureExtractor) featurePromptTextLen(req *openai.ChatCompletionRequest) int {
 	allMsgTextLen := 0
 	for _, msg := range req.Messages {
-		allMsgTextLen += len([]rune(e.combinedTextForChatCompletionsMessage(&msg)))
+		allMsgTextLen += len([]rune(e.combinedTextForChatCompletionsMessage(msg)))
 	}
 	return allMsgTextLen
 }
