@@ -27,6 +27,7 @@ type GeneralEndpointConfig struct {
 
 var DefaultURLPathChatCompletions = "/v1/chat/completions"
 var DefaultURLPathClaudeMessages = "/v1/messages"
+var DefaultURLPathEmbeddings = "/v1/embeddings"
 
 func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 	apiKey := conf.APIKey
@@ -47,6 +48,8 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 					endpoint = DefaultURLPathClaudeMessages
 				case octollm.APIFormatChatCompletions:
 					endpoint = DefaultURLPathChatCompletions
+				case octollm.APIFormatEmbeddings:
+					endpoint = DefaultURLPathEmbeddings
 				default:
 					return "", fmt.Errorf("invalid format: %s", req.Format)
 				}
@@ -66,6 +69,8 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 				switch req.Format {
 				case octollm.APIFormatClaudeMessages:
 					return &octollm.JSONParser[anthropic.Message]{}
+				case octollm.APIFormatEmbeddings:
+					return &octollm.JSONParser[openai.EmbeddingResponse]{}
 				default:
 					return &octollm.JSONParser[openai.ChatCompletionResponse]{}
 				}
@@ -74,6 +79,9 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 				switch req.Format {
 				case octollm.APIFormatClaudeMessages:
 					return &octollm.JSONParser[anthropic.BetaRawMessageStreamEventUnion]{}
+				case octollm.APIFormatEmbeddings:
+					// Embeddings don't support streaming, return nil or a placeholder
+					return &octollm.JSONParser[openai.EmbeddingResponse]{}
 				default:
 					return &octollm.JSONParser[openai.ChatCompletionStreamChunk]{}
 				}

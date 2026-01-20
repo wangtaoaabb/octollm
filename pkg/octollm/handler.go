@@ -112,3 +112,8 @@ func ChatCompletionsHandler(engine Engine) http.HandlerFunc {
 func MessagesHandler(engine Engine) http.HandlerFunc {
 	return httpHandler(engine, APIFormatClaudeMessages, &JSONParser[anthropic.ClaudeMessagesRequest]{})
 }
+
+// EmbeddingsHandler handles OpenAI /v1/embeddings requests
+func EmbeddingsHandler(engine Engine) http.HandlerFunc {
+	return httpHandler(engine, APIFormatEmbeddings, &JSONParser[openai.EmbeddingRequest]{})
+}

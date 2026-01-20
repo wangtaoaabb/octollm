@@ -17,6 +17,7 @@ const (
 	APIFormatLegacyCompletions     APIFormat = "completions"
 	APIFormatClaudeMessages        APIFormat = "messages"
 	APIFormatVertexGenerateContent APIFormat = "vertex"
+	APIFormatEmbeddings            APIFormat = "embeddings"
 )
 
 // Parser parses and serializes body of requests or responses.

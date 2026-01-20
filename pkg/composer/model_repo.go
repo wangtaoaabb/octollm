@@ -75,6 +75,9 @@ func (m *ModelRepoFileBased) UpdateFromConfig(conf *ConfigFile) error {
 			if backend.URLPathVertex != nil {
 				finalBackend.URLPathVertex = backend.URLPathVertex
 			}
+			if backend.URLPathEmbedding != nil {
+				finalBackend.URLPathEmbedding = backend.URLPathEmbedding
+			}
 			if backend.ConvertToChat != "" {
 				finalBackend.ConvertToChat = backend.ConvertToChat
 			}
@@ -175,8 +178,15 @@ func (m *ModelRepoFileBased) BuildEngineByBackend(b *Backend) (octollm.Engine, e
 	} else {
 		generalConf.Endpoints[octollm.APIFormatClaudeMessages] = "" // will use default
 	}
+	if b.URLPathEmbedding != nil {
+		if *b.URLPathEmbedding != "" {
+			generalConf.Endpoints[octollm.APIFormatEmbeddings] = *b.URLPathEmbedding
+		}
+	} else {
+		generalConf.Endpoints[octollm.APIFormatEmbeddings] = "" // will use default
+	}
 	if len(generalConf.Endpoints) == 0 {
-		return nil, fmt.Errorf("backend must specify either URLPathChat, URLPathMessages or URLPathVertex")
+		return nil, fmt.Errorf("backend must specify either URLPathChat, URLPathMessages, URLPathVertex or URLPathEmbedding")
 	}
 
 	llmGE := client.NewGeneralEndpoint(*generalConf)

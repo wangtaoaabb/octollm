@@ -1,0 +1,29 @@
+# Example configuration for embedding support
+# This config demonstrates how to set up embedding endpoints
+
+models:
+  # OpenAI embedding model
+  text-embedding-ada-002:
+    backends:
+      default:1:
+        base_url: https://api.openai.com
+        url_path_embedding: /v1/embeddings
+        # if not set, read from env var OCTOLLM_API_KEY
+        # api_key: sk-xxxx
+
+  # Custom embedding model (e.g., from a local deployment)
+  custom-embedding-model:
+    backends:
+      default:1:
+        base_url: https://your-embedding-service.com
+        url_path_embedding: /v1/embeddings
+        # api_key: your-custom-key
+
+  # Model that supports both chat and embedding
+  multi-purpose-model:
+    backends:
+      default:1:
+        base_url: https://api.example.com
+        url_path_chat: /v1/chat/completions
+        url_path_embedding: /v1/embeddings
+        # api_key: your-api-key
