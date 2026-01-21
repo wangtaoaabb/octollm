@@ -78,6 +78,9 @@ func (m *ModelRepoFileBased) UpdateFromConfig(conf *ConfigFile) error {
 			if backend.URLPathEmbedding != nil {
 				finalBackend.URLPathEmbedding = backend.URLPathEmbedding
 			}
+			if backend.URLPathRerank != nil {
+				finalBackend.URLPathRerank = backend.URLPathRerank
+			}
 			if backend.ConvertToChat != "" {
 				finalBackend.ConvertToChat = backend.ConvertToChat
 			}
@@ -185,8 +188,15 @@ func (m *ModelRepoFileBased) BuildEngineByBackend(b *Backend) (octollm.Engine, e
 	} else {
 		generalConf.Endpoints[octollm.APIFormatEmbeddings] = "" // will use default
 	}
+	if b.URLPathRerank != nil {
+		if *b.URLPathRerank != "" {
+			generalConf.Endpoints[octollm.APIFormatRerank] = *b.URLPathRerank
+		}
+	} else {
+		generalConf.Endpoints[octollm.APIFormatRerank] = "" // will use default
+	}
 	if len(generalConf.Endpoints) == 0 {
-		return nil, fmt.Errorf("backend must specify either URLPathChat, URLPathMessages, URLPathVertex or URLPathEmbedding")
+		return nil, fmt.Errorf("backend must specify at least one URL path (chat, messages, vertex, embedding, or rerank)")
 	}
 
 	llmGE := client.NewGeneralEndpoint(*generalConf)
@@ -194,6 +204,11 @@ func (m *ModelRepoFileBased) BuildEngineByBackend(b *Backend) (octollm.Engine, e
 	if b.HTTPProxy != nil {
 		httpCli := m.cliManager.GetClient(*b.HTTPProxy)
 		llmEngine = llmGE.WithClient(httpCli)
+	}
+
+	// Add rerank normalizer if rerank endpoint is configured
+	if _, ok := generalConf.Endpoints[octollm.APIFormatRerank]; ok {
+		llmEngine = engines.NewRerankNormalizer(llmEngine)
 	}
 
 	if b.ConvertToMessages != "" {

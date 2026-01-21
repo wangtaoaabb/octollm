@@ -37,6 +37,8 @@ func main() {
 	r.Use(gzip.Gzip(gzip.DefaultCompression), auth.Handle())
 	r.POST("/v1/chat/completions", s.ChatCompletionsHandler())
 	r.POST("/v1/messages", s.MessagesHandler())
+	r.POST("/v1/embeddings", s.EmbeddingsHandler())
+	r.POST("/v1/rerank", s.RerankHandler())
 
 	log.Println("listening :8080")
 	log.Fatal(http.ListenAndServe(":8080", r))

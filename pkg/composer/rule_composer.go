@@ -275,6 +275,8 @@ func (r *RuleComposerEngine) Process(req *octollm.Request) (*octollm.Response, e
 			r.Model = body.Model
 		case *openai.EmbeddingRequest:
 			r.Model = body.Model
+		case *openai.RerankRequest:
+			r.Model = body.Model
 		case *anthropic.ClaudeMessagesRequest:
 			r.Model = body.Model
 		case *anthropicSDK.MessageNewParams:

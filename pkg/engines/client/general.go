@@ -2,12 +2,11 @@ package client
 
 import (
 	"fmt"
+	"github.com/infinigence/octollm/pkg/octollm"
+	"github.com/infinigence/octollm/pkg/types/anthropic"
+	"github.com/infinigence/octollm/pkg/types/openai"
 	"net/http"
 	"os"
-
-	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/infinigence/octollm/pkg/octollm"
-	"github.com/infinigence/octollm/pkg/types/openai"
 )
 
 type GeneralEndpoint struct {
@@ -28,6 +27,7 @@ type GeneralEndpointConfig struct {
 var DefaultURLPathChatCompletions = "/v1/chat/completions"
 var DefaultURLPathClaudeMessages = "/v1/messages"
 var DefaultURLPathEmbeddings = "/v1/embeddings"
+var DefaultURLPathRerank = "/v1/rerank"
 
 func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 	apiKey := conf.APIKey
@@ -50,6 +50,8 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 					endpoint = DefaultURLPathChatCompletions
 				case octollm.APIFormatEmbeddings:
 					endpoint = DefaultURLPathEmbeddings
+				case octollm.APIFormatRerank:
+					endpoint = DefaultURLPathRerank
 				default:
 					return "", fmt.Errorf("invalid format: %s", req.Format)
 				}
@@ -68,9 +70,11 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 			func(req *octollm.Request) octollm.Parser {
 				switch req.Format {
 				case octollm.APIFormatClaudeMessages:
-					return &octollm.JSONParser[anthropic.Message]{}
+					return &octollm.JSONParser[anthropic.ClaudeMessagesResponse]{}
 				case octollm.APIFormatEmbeddings:
 					return &octollm.JSONParser[openai.EmbeddingResponse]{}
+				case octollm.APIFormatRerank:
+					return &octollm.JSONParser[openai.RawRerankResponse]{}
 				default:
 					return &octollm.JSONParser[openai.ChatCompletionResponse]{}
 				}
@@ -78,10 +82,13 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 			func(req *octollm.Request) octollm.Parser {
 				switch req.Format {
 				case octollm.APIFormatClaudeMessages:
-					return &octollm.JSONParser[anthropic.BetaRawMessageStreamEventUnion]{}
+					return &octollm.JSONParser[anthropic.ClaudeMessagesStreamEvent]{}
 				case octollm.APIFormatEmbeddings:
-					// Embeddings don't support streaming, return nil or a placeholder
+					// Embeddings don't support streaming
 					return &octollm.JSONParser[openai.EmbeddingResponse]{}
+				case octollm.APIFormatRerank:
+					// Rerank doesn't support streaming
+					return &octollm.JSONParser[openai.RawRerankResponse]{}
 				default:
 					return &octollm.JSONParser[openai.ChatCompletionStreamChunk]{}
 				}

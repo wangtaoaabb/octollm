@@ -18,6 +18,7 @@ const (
 	APIFormatClaudeMessages        APIFormat = "messages"
 	APIFormatVertexGenerateContent APIFormat = "vertex"
 	APIFormatEmbeddings            APIFormat = "embeddings"
+	APIFormatRerank                APIFormat = "rerank"
 )
 
 // Parser parses and serializes body of requests or responses.

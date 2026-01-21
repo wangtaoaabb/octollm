@@ -117,3 +117,8 @@ func MessagesHandler(engine Engine) http.HandlerFunc {
 func EmbeddingsHandler(engine Engine) http.HandlerFunc {
 	return httpHandler(engine, APIFormatEmbeddings, &JSONParser[openai.EmbeddingRequest]{})
 }
+
+// RerankHandler handles rerank requests
+func RerankHandler(engine Engine) http.HandlerFunc {
+	return httpHandler(engine, APIFormatRerank, &JSONParser[openai.RerankRequest]{})
+}

@@ -38,6 +38,7 @@ type Backend struct {
 	URLPathMessages         *string           `json:"url_path_messages" yaml:"url_path_messages"`
 	URLPathVertex           *string           `json:"url_path_vertex" yaml:"url_path_vertex"`
 	URLPathEmbedding        *string           `json:"url_path_embedding" yaml:"url_path_embedding"`
+	URLPathRerank           *string           `json:"url_path_rerank" yaml:"url_path_rerank"`
 
 	ConvertToChat     string `json:"convert_to_chat" yaml:"convert_to_chat"`         // "from_messages" or "from_vertex"
 	ConvertToMessages string `json:"convert_to_messages" yaml:"convert_to_messages"` // "from_chat" or "from_vertex"

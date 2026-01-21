@@ -1,0 +1,30 @@
+# Example configuration for rerank support
+# This config demonstrates how to set up rerank endpoints
+
+models:
+  # BGE reranker model
+  bge-reranker-v2-m3:
+    backends:
+      default:1:
+        base_url: https://api.example.com
+        url_path_rerank: /v1/rerank
+        # if not set, read from env var OCTOLLM_API_KEY
+        # api_key: sk-xxxx
+
+  # Custom rerank model
+  custom-reranker:
+    backends:
+      default:1:
+        base_url: https://your-rerank-service.com
+        url_path_rerank: /rerank
+        # api_key: your-custom-key
+
+  # Model that supports multiple capabilities
+  multi-purpose-model:
+    backends:
+      default:1:
+        base_url: https://api.example.com
+        url_path_chat: /v1/chat/completions
+        url_path_embedding: /v1/embeddings
+        url_path_rerank: /v1/rerank
+        # api_key: your-api-key
