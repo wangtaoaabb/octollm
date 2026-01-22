@@ -69,6 +69,9 @@ func (m *ModelRepoFileBased) UpdateFromConfig(conf *ConfigFile) error {
 			if backend.URLPathChat != nil {
 				finalBackend.URLPathChat = backend.URLPathChat
 			}
+			if backend.URLPathCompletions != nil {
+				finalBackend.URLPathCompletions = backend.URLPathCompletions
+			}
 			if backend.URLPathMessages != nil {
 				finalBackend.URLPathMessages = backend.URLPathMessages
 			}
@@ -173,6 +176,13 @@ func (m *ModelRepoFileBased) BuildEngineByBackend(b *Backend) (octollm.Engine, e
 		}
 	} else {
 		generalConf.Endpoints[octollm.APIFormatChatCompletions] = "" // will use default
+	}
+	if b.URLPathCompletions != nil {
+		if *b.URLPathCompletions != "" {
+			generalConf.Endpoints[octollm.APIFormatCompletions] = *b.URLPathCompletions
+		}
+	} else {
+		generalConf.Endpoints[octollm.APIFormatCompletions] = "" // will use default
 	}
 	if b.URLPathMessages != nil {
 		if *b.URLPathMessages != "" {

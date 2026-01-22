@@ -2,11 +2,12 @@ package client
 
 import (
 	"fmt"
+	"net/http"
+	"os"
+
 	"github.com/infinigence/octollm/pkg/octollm"
 	"github.com/infinigence/octollm/pkg/types/anthropic"
 	"github.com/infinigence/octollm/pkg/types/openai"
-	"net/http"
-	"os"
 )
 
 type GeneralEndpoint struct {
@@ -25,6 +26,7 @@ type GeneralEndpointConfig struct {
 }
 
 var DefaultURLPathChatCompletions = "/v1/chat/completions"
+var DefaultURLPathCompletions = "/v1/completions"
 var DefaultURLPathClaudeMessages = "/v1/messages"
 var DefaultURLPathEmbeddings = "/v1/embeddings"
 var DefaultURLPathRerank = "/v1/rerank"
@@ -48,6 +50,8 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 					endpoint = DefaultURLPathClaudeMessages
 				case octollm.APIFormatChatCompletions:
 					endpoint = DefaultURLPathChatCompletions
+				case octollm.APIFormatCompletions:
+					endpoint = DefaultURLPathCompletions
 				case octollm.APIFormatEmbeddings:
 					endpoint = DefaultURLPathEmbeddings
 				case octollm.APIFormatRerank:
@@ -71,6 +75,8 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 				switch req.Format {
 				case octollm.APIFormatClaudeMessages:
 					return &octollm.JSONParser[anthropic.ClaudeMessagesResponse]{}
+				case octollm.APIFormatCompletions:
+					return &octollm.JSONParser[openai.CompletionResponse]{}
 				case octollm.APIFormatEmbeddings:
 					return &octollm.JSONParser[openai.EmbeddingResponse]{}
 				case octollm.APIFormatRerank:
@@ -83,6 +89,8 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 				switch req.Format {
 				case octollm.APIFormatClaudeMessages:
 					return &octollm.JSONParser[anthropic.ClaudeMessagesStreamEvent]{}
+				case octollm.APIFormatCompletions:
+					return &octollm.JSONParser[openai.CompletionStreamChunk]{}
 				case octollm.APIFormatEmbeddings:
 					// Embeddings don't support streaming
 					return &octollm.JSONParser[openai.EmbeddingResponse]{}

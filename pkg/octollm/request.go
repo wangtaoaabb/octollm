@@ -14,7 +14,7 @@ type APIFormat string
 const (
 	APIFormatUnknown               APIFormat = ""
 	APIFormatChatCompletions       APIFormat = "chat/completions"
-	APIFormatLegacyCompletions     APIFormat = "completions"
+	APIFormatCompletions           APIFormat = "completions"
 	APIFormatClaudeMessages        APIFormat = "messages"
 	APIFormatVertexGenerateContent APIFormat = "vertex"
 	APIFormatEmbeddings            APIFormat = "embeddings"

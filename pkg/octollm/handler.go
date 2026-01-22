@@ -106,7 +106,10 @@ func ChatCompletionsHandler(engine Engine) http.HandlerFunc {
 	return httpHandler(engine, APIFormatChatCompletions, &JSONParser[openai.ChatCompletionRequest]{})
 }
 
-// LegacyCompletionsHandler handles OpenAI /v1/completions requests
+// CompletionsHandler handles OpenAI /v1/completions requests (legacy)
+func CompletionsHandler(engine Engine) http.HandlerFunc {
+	return httpHandler(engine, APIFormatCompletions, &JSONParser[openai.CompletionRequest]{})
+}
 
 // MessagesHandler handles Anthropic /v1/messages requests
 func MessagesHandler(engine Engine) http.HandlerFunc {

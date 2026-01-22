@@ -35,6 +35,7 @@ type Backend struct {
 	AnthropicAPIKeyAsBearer *bool             `json:"anthropic_api_key_as_bearer" yaml:"anthropic_api_key_as_bearer"`
 	ExtraHeaders            map[string]string `json:"extra_headers" yaml:"extra_headers"`
 	URLPathChat             *string           `json:"url_path_chat" yaml:"url_path_chat"`
+	URLPathCompletions      *string           `json:"url_path_completions" yaml:"url_path_completions"`
 	URLPathMessages         *string           `json:"url_path_messages" yaml:"url_path_messages"`
 	URLPathVertex           *string           `json:"url_path_vertex" yaml:"url_path_vertex"`
 	URLPathEmbedding        *string           `json:"url_path_embedding" yaml:"url_path_embedding"`

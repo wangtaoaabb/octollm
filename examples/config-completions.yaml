@@ -1,0 +1,10 @@
+# Example configuration for completions (legacy) support
+# Note: OpenAI Completions API is legacy, prefer chat/completions for new projects
+
+models:
+  qwen2.5-coder-14b:
+    backends:
+      default:1:
+        base_url: https://cloud.infini-ai.com/maas
+        url_path_chat: /v1/completions
+        api_key: sk-xxx

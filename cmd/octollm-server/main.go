@@ -36,6 +36,7 @@ func main() {
 	// Register routes
 	r.Use(gzip.Gzip(gzip.DefaultCompression), auth.Handle())
 	r.POST("/v1/chat/completions", s.ChatCompletionsHandler())
+	r.POST("/v1/completions", s.CompletionsHandler())
 	r.POST("/v1/messages", s.MessagesHandler())
 	r.POST("/v1/embeddings", s.EmbeddingsHandler())
 	r.POST("/v1/rerank", s.RerankHandler())

@@ -66,6 +66,17 @@ func (s *Server) EmbeddingsHandler() gin.HandlerFunc {
 	}
 }
 
+func (s *Server) CompletionsHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		orgName := c.GetString("org")
+		userName := c.GetString("user")
+
+		engine := s.ruleComposer.GetEngine(userName, orgName, "")
+		handler := octollm.CompletionsHandler(engine)
+		handler(c.Writer, c.Request)
+	}
+}
+
 func (s *Server) RerankHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		orgName := c.GetString("org")
