@@ -8,6 +8,7 @@ import (
 	"github.com/infinigence/octollm/pkg/octollm"
 	"github.com/infinigence/octollm/pkg/types/anthropic"
 	"github.com/infinigence/octollm/pkg/types/openai"
+	"github.com/infinigence/octollm/pkg/types/rerank"
 )
 
 type GeneralEndpoint struct {
@@ -80,7 +81,7 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 				case octollm.APIFormatEmbeddings:
 					return &octollm.JSONParser[openai.EmbeddingResponse]{}
 				case octollm.APIFormatRerank:
-					return &octollm.JSONParser[openai.RawRerankResponse]{}
+					return &octollm.JSONParser[rerank.RerankResponse]{}
 				default:
 					return &octollm.JSONParser[openai.ChatCompletionResponse]{}
 				}
@@ -96,7 +97,7 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 					return &octollm.JSONParser[openai.EmbeddingResponse]{}
 				case octollm.APIFormatRerank:
 					// Rerank doesn't support streaming
-					return &octollm.JSONParser[openai.RawRerankResponse]{}
+					return &octollm.JSONParser[rerank.RerankResponse]{}
 				default:
 					return &octollm.JSONParser[openai.ChatCompletionStreamChunk]{}
 				}

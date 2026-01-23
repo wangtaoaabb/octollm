@@ -17,6 +17,7 @@ import (
 	"github.com/infinigence/octollm/pkg/octollm"
 	"github.com/infinigence/octollm/pkg/types/anthropic"
 	"github.com/infinigence/octollm/pkg/types/openai"
+	"github.com/infinigence/octollm/pkg/types/rerank"
 )
 
 type RuleComposerFileBased struct {
@@ -277,7 +278,7 @@ func (r *RuleComposerEngine) Process(req *octollm.Request) (*octollm.Response, e
 			r.Model = body.Model
 		case *openai.EmbeddingRequest:
 			r.Model = body.Model
-		case *openai.RerankRequest:
+		case *rerank.RerankRequest:
 			r.Model = body.Model
 		case *anthropic.ClaudeMessagesRequest:
 			r.Model = body.Model

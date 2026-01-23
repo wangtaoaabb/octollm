@@ -1,4 +1,4 @@
-package openai
+package rerank
 
 import (
 	"encoding/json"
@@ -90,77 +90,55 @@ func TestRerankRequest_MarshalJSON(t *testing.T) {
 	}
 }
 
-func TestRawRerankResponse_Xinference(t *testing.T) {
-	// Test xinference format (with meta)
+func TestRerankResponse_Standard(t *testing.T) {
+	// Test standard RerankResponse format
 	jsonStr := `{
 		"results": [
 			{
 				"index": 0,
 				"relevance_score": 0.999,
 				"document": {"text": "Paris is the capital of France."}
+			},
+			{
+				"index": 1,
+				"relevance_score": 0.8,
+				"document": {"text": "London is the capital of UK."}
 			}
 		],
-		"meta": {
-			"tokens": {
-				"input_tokens": 35,
-				"output_tokens": 0
-			}
+		"model": "bge-reranker-v2-m3",
+		"usage": {
+			"prompt_tokens": 35,
+			"total_tokens": 35
 		}
 	}`
 
-	var resp RawRerankResponse
+	var resp RerankResponse
 	err := json.Unmarshal([]byte(jsonStr), &resp)
 	if err != nil {
 		t.Fatalf("Failed to unmarshal: %v", err)
 	}
 
-	if len(resp.Results) != 1 {
-		t.Errorf("Expected 1 result, got %d", len(resp.Results))
+	if len(resp.Results) != 2 {
+		t.Errorf("Expected 2 results, got %d", len(resp.Results))
 	}
 
 	if resp.Results[0].RelevanceScore != 0.999 {
 		t.Errorf("Expected relevance_score 0.999, got %f", resp.Results[0].RelevanceScore)
 	}
 
-	if resp.Meta == nil {
-		t.Fatal("Expected meta to be present")
+	if resp.Results[0].Document.Text != "Paris is the capital of France." {
+		t.Errorf("Unexpected document text: %s", resp.Results[0].Document.Text)
 	}
 
-	if resp.Meta.Tokens.InputTokens != 35 {
-		t.Errorf("Expected input_tokens 35, got %d", resp.Meta.Tokens.InputTokens)
-	}
-}
-
-func TestRawRerankResponse_VLLM(t *testing.T) {
-	// Test vllm format (with usage)
-	jsonStr := `{
-		"results": [
-			{
-				"index": 0,
-				"relevance_score": 0.999,
-				"document": {"text": "Paris is the capital of France."}
-			}
-		],
-		"usage": {
-			"total_tokens": 9
-		}
-	}`
-
-	var resp RawRerankResponse
-	err := json.Unmarshal([]byte(jsonStr), &resp)
-	if err != nil {
-		t.Fatalf("Failed to unmarshal: %v", err)
+	if resp.Model != "bge-reranker-v2-m3" {
+		t.Errorf("Expected model bge-reranker-v2-m3, got %s", resp.Model)
 	}
 
-	if len(resp.Results) != 1 {
-		t.Errorf("Expected 1 result, got %d", len(resp.Results))
+	if resp.Usage.PromptTokens != 35 {
+		t.Errorf("Expected prompt_tokens 35, got %d", resp.Usage.PromptTokens)
 	}
 
-	if resp.Usage == nil {
-		t.Fatal("Expected usage to be present")
-	}
-
-	if resp.Usage.TotalTokens != 9 {
-		t.Errorf("Expected total_tokens 9, got %d", resp.Usage.TotalTokens)
+	if resp.Usage.TotalTokens != 35 {
+		t.Errorf("Expected total_tokens 35, got %d", resp.Usage.TotalTokens)
 	}
 }

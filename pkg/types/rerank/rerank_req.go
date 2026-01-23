@@ -1,6 +1,7 @@
-package openai
+package rerank
 
 // RerankRequest represents the request structure for rerank API
+// This follows the Cohere/Jina rerank API format
 type RerankRequest struct {
 	Query           string   `json:"query" binding:"required"`
 	Model           string   `json:"model" binding:"required"`

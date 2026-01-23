@@ -216,11 +216,6 @@ func (m *ModelRepoFileBased) BuildEngineByBackend(b *Backend) (octollm.Engine, e
 		llmEngine = llmGE.WithClient(httpCli)
 	}
 
-	// Add rerank normalizer if rerank endpoint is configured
-	if _, ok := generalConf.Endpoints[octollm.APIFormatRerank]; ok {
-		llmEngine = engines.NewRerankNormalizer(llmEngine)
-	}
-
 	if b.ConvertToMessages != "" {
 		oriEngine := llmEngine
 		var convEngine octollm.Engine

@@ -9,6 +9,7 @@ import (
 	"github.com/infinigence/octollm/pkg/errutils"
 	"github.com/infinigence/octollm/pkg/types/anthropic"
 	"github.com/infinigence/octollm/pkg/types/openai"
+	"github.com/infinigence/octollm/pkg/types/rerank"
 	"github.com/sirupsen/logrus"
 )
 
@@ -123,5 +124,5 @@ func EmbeddingsHandler(engine Engine) http.HandlerFunc {
 
 // RerankHandler handles rerank requests
 func RerankHandler(engine Engine) http.HandlerFunc {
-	return httpHandler(engine, APIFormatRerank, &JSONParser[openai.RerankRequest]{})
+	return httpHandler(engine, APIFormatRerank, &JSONParser[rerank.RerankRequest]{})
 }
