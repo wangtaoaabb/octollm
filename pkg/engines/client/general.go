@@ -63,14 +63,6 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 			}
 			return conf.BaseURL + endpoint, nil
 		}).
-		WithRequestModifier(func(req *octollm.Request, httpReq *http.Request) *http.Request {
-			if req.Format == octollm.APIFormatClaudeMessages && !conf.AnthropicAPIKeyAsBearer {
-				httpReq.Header.Set("x-api-key", apiKey)
-			} else {
-				httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-			}
-			return httpReq
-		}).
 		WithParser(
 			func(req *octollm.Request) octollm.Parser {
 				switch req.Format {
@@ -103,6 +95,19 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 				}
 			},
 		)
+
+	if apiKey != "" {
+		httpEndpoint = httpEndpoint.WithRequestModifier(func(req *octollm.Request, httpReq *http.Request) *http.Request {
+
+			if req.Format == octollm.APIFormatClaudeMessages && !conf.AnthropicAPIKeyAsBearer {
+				httpReq.Header.Set("x-api-key", apiKey)
+			} else {
+				httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+			}
+			return httpReq
+		})
+	}
+
 	return &GeneralEndpoint{
 		HTTPEndpoint: httpEndpoint,
 	}
