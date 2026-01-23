@@ -73,10 +73,36 @@ type ClaudeMessagesStreamEvent struct {
 	// For content_block_start event
 	Index *int `json:"index,omitempty"`
 
-	ContentBlock MessageContent  `json:"content_block,omitempty"`
+	ContentBlock MessageContent  `json:"-"`
 	DeltaRaw     json.RawMessage `json:"delta,omitempty"`
 	Usage        *Usage          `json:"usage,omitempty"`
 	Error        *APIError       `json:"error,omitempty"`
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for ClaudeMessagesStreamEvent
+func (e *ClaudeMessagesStreamEvent) UnmarshalJSON(data []byte) error {
+	type Alias ClaudeMessagesStreamEvent
+	aux := &struct {
+		ContentBlockRaw json.RawMessage `json:"content_block,omitempty"`
+		*Alias
+	}{
+		Alias: (*Alias)(e),
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	// Parse ContentBlock field if present
+	if len(aux.ContentBlockRaw) > 0 && string(aux.ContentBlockRaw) != "null" {
+		var contentBlock MessageContentBlock
+		if err := json.Unmarshal(aux.ContentBlockRaw, &contentBlock); err != nil {
+			return err
+		}
+		e.ContentBlock = &contentBlock
+	}
+
+	return nil
 }
 
 // GetContentBlockDelta returns the delta as ApiContentBlockDelta if applicable
@@ -181,4 +207,14 @@ func (e *ClaudeMessagesStreamEvent) IsMessageStop() bool {
 // IsContentBlockDelta checks if this is a content block delta event
 func (e *ClaudeMessagesStreamEvent) IsContentBlockDelta() bool {
 	return e.Type == "content_block_delta"
+}
+
+// IsContentBlockStart checks if this is a content block start event
+func (e *ClaudeMessagesStreamEvent) IsContentBlockStart() bool {
+	return e.Type == "content_block_start"
+}
+
+// IsContentBlockStop checks if this is a content block stop event
+func (e *ClaudeMessagesStreamEvent) IsContentBlockStop() bool {
+	return e.Type == "content_block_stop"
 }

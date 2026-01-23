@@ -43,6 +43,11 @@ func (a *OpenAIAdapter) extracTextFromRequest(ctx context.Context, body *openai.
 }
 
 func (a *OpenAIAdapter) extractTextFromNonStreamResponse(ctx context.Context, body *openai.ChatCompletionResponse) ([]rune, error) {
+	// 非流式响应必须有 choices
+	if len(body.Choices) == 0 {
+		return nil, fmt.Errorf("non-stream response has no choices")
+	}
+
 	if len(body.Choices) != 1 {
 		return nil, fmt.Errorf("only support 1 choice, got %d", len(body.Choices))
 	}
@@ -59,6 +64,12 @@ func (a *OpenAIAdapter) extractTextFromNonStreamResponse(ctx context.Context, bo
 }
 
 func (a *OpenAIAdapter) extractTextFromStreamResponse(ctx context.Context, body *openai.ChatCompletionStreamChunk) ([]rune, error) {
+	// 流式响应中某些 chunk 可能没有 choices（如 usage chunk）
+	// 这是正常情况，直接返回空文本
+	if len(body.Choices) == 0 {
+		return []rune{}, nil
+	}
+
 	if len(body.Choices) != 1 {
 		return nil, fmt.Errorf("only support 1 choice, got %d", len(body.Choices))
 	}

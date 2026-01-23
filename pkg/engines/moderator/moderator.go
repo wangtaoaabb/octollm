@@ -108,6 +108,11 @@ func (e *TextModeratorEngine) Process(req *octollm.Request) (*octollm.Response, 
 			logrus.WithContext(ctx).Debugf("[moderate] stream chunk")
 			text, err := e.TextModeratorAdapter.ExtractTextFromBody(ctx, chunk.Body)
 			if err != nil {
+				// stream done 是正常结束信号，不应该视为错误
+				if errors.Is(err, octollm.ErrStreamDone) {
+					logrus.WithContext(ctx).Debugf("stream done, will process remaining chunks")
+					break
+				}
 				logrus.WithContext(ctx).Debugf("extract text from stream chunk error: %s", err)
 				moderationFailedErr = fmt.Errorf("%w: %w", ErrModeratorInternalError, err)
 				break
@@ -137,15 +142,36 @@ func (e *TextModeratorEngine) Process(req *octollm.Request) (*octollm.Response, 
 				chunkBuffer = make([]*octollm.StreamChunk, 0, moderateEvery)
 			}
 		}
+
+		// Handle remaining chunks after stream ends
+		if moderationFailedErr == nil && len(chunkBuffer) > 0 {
+			logrus.WithContext(ctx).Debugf("[moderate] processing %d remaining chunks", len(chunkBuffer))
+			if err := e.ModeratorService.Allow(ctx, textBuffer); err != nil {
+				logrus.WithContext(ctx).Debugf("moderate remaining stream chunks error: %s", err)
+				moderationFailedErr = fmt.Errorf("%w: %w", ErrOutputNotAllowed, err)
+			} else {
+				// Send remaining chunks if moderation passed
+				for _, chunk := range chunkBuffer {
+					select {
+					case newChunks <- chunk:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+		}
+
 		if moderationFailedErr != nil {
 			// get replacement chunk
 			originalChunks.Close()
-			replacement := e.TextModeratorAdapter.GetReplacementBody(req.Context(), chunkBuffer[0].Body)
-			if replacement != nil {
-				select {
-				case newChunks <- &octollm.StreamChunk{Body: replacement}:
-				case <-ctx.Done():
-					return
+			if len(chunkBuffer) > 0 {
+				replacement := e.TextModeratorAdapter.GetReplacementBody(req.Context(), chunkBuffer[0].Body)
+				if replacement != nil {
+					select {
+					case newChunks <- &octollm.StreamChunk{Body: replacement}:
+					case <-ctx.Done():
+						return
+					}
 				}
 			}
 		}

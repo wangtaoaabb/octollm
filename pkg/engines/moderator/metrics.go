@@ -51,6 +51,15 @@ var (
 		},
 		[]string{"service", "result", "status"},
 	)
+
+	// Duplication detection counter
+	RepeatDetectionCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "octollm_repeat_detection_total",
+			Help: "Total number of repeat pattern detections",
+		},
+		[]string{"service", "model"},
+	)
 )
 
 func init() {
@@ -58,6 +67,7 @@ func init() {
 	prometheus.MustRegister(moderatorRequestDuration)
 	prometheus.MustRegister(moderatorContentLength)
 	prometheus.MustRegister(moderatorRequestsTotal)
+	prometheus.MustRegister(RepeatDetectionCounter)
 }
 
 // PrometheusModeratorMetrics implements Prometheus metrics

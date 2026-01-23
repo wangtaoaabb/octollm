@@ -25,6 +25,18 @@ type Model struct {
 	RequestRewrites     *engines.RewritePolicy `json:"request_rewrites" yaml:"request_rewrites"`
 	ResponseRewrites    *engines.RewritePolicy `json:"response_rewrites" yaml:"response_rewrites"`
 	StreamChunkRewrites *engines.RewritePolicy `json:"stream_chunk_rewrites" yaml:"stream_chunk_rewrites"`
+
+	RepeatDetection *RepeatDetectionConfig `json:"repeat_detection" yaml:"repeat_detection"`
+}
+
+type RepeatDetectionConfig struct {
+	Enabled             bool   `json:"enabled" yaml:"enabled"`                             // whether to enable repeat detection
+	MinRepeatLen        int    `json:"min_repeat_len" yaml:"min_repeat_len"`               // minimum repeat length
+	MaxRepeatLen        int    `json:"max_repeat_len" yaml:"max_repeat_len"`               // maximum repeat length
+	RepeatThreshold     int    `json:"repeat_threshold" yaml:"repeat_threshold"`           // repeat threshold
+	BlockOnDetect       bool   `json:"block_on_detect" yaml:"block_on_detect"`             // whether to block on detect (default false, only log no block)
+	BlockMessage        string `json:"block_message" yaml:"block_message"`                 // block message
+	ModerateStreamEvery int    `json:"moderate_stream_every" yaml:"moderate_stream_every"` // stream detection frequency (every N chunks)
 }
 
 type Backend struct {
