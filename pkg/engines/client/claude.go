@@ -34,8 +34,8 @@ func NewClaudeMessagesEndpoint(baseAddr, endpoint, apiKey string) *ClaudeMessage
 		}).
 		WithParser(
 			func(req *octollm.Request) octollm.Parser { return &octollm.JSONParser[anthropic.Message]{} },
-			func(req *octollm.Request) octollm.Parser {
-				return &octollm.JSONParser[anthropic.BetaRawMessageStreamEventUnion]{}
+			func(req *octollm.Request) (octollm.Parser, StreamingType) {
+				return &octollm.JSONParser[anthropic.BetaRawMessageStreamEventUnion]{}, StreamingTypeSSE
 			},
 		)
 	return &ClaudeMessagesEndpoint{

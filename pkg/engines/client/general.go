@@ -1,6 +1,7 @@
 package client
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -66,6 +67,8 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 		WithParser(
 			func(req *octollm.Request) octollm.Parser {
 				switch req.Format {
+				case octollm.APIFormatChatCompletions:
+					return &octollm.JSONParser[openai.ChatCompletionRequest]{}
 				case octollm.APIFormatClaudeMessages:
 					return &octollm.JSONParser[anthropic.ClaudeMessagesResponse]{}
 				case octollm.APIFormatCompletions:
@@ -75,23 +78,21 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 				case octollm.APIFormatRerank:
 					return &octollm.JSONParser[rerank.RerankResponse]{}
 				default:
-					return &octollm.JSONParser[openai.ChatCompletionResponse]{}
+					return &octollm.JSONParser[json.RawMessage]{}
 				}
 			},
-			func(req *octollm.Request) octollm.Parser {
+			func(req *octollm.Request) (octollm.Parser, StreamingType) {
 				switch req.Format {
-				case octollm.APIFormatClaudeMessages:
-					return &octollm.JSONParser[anthropic.ClaudeMessagesStreamEvent]{}
+				case octollm.APIFormatChatCompletions:
+					return &octollm.JSONParser[openai.ChatCompletionStreamChunk]{}, StreamingTypeSSE
 				case octollm.APIFormatCompletions:
-					return &octollm.JSONParser[openai.CompletionStreamChunk]{}
-				case octollm.APIFormatEmbeddings:
-					// Embeddings don't support streaming
-					return &octollm.JSONParser[openai.EmbeddingResponse]{}
-				case octollm.APIFormatRerank:
-					// Rerank doesn't support streaming
-					return &octollm.JSONParser[rerank.RerankResponse]{}
+					return &octollm.JSONParser[openai.CompletionStreamChunk]{}, StreamingTypeSSE
+				case octollm.APIFormatClaudeMessages:
+					return &octollm.JSONParser[anthropic.ClaudeMessagesStreamEvent]{}, StreamingTypeSSE
+				case octollm.APIFormatGoogleGenerateContent:
+					return &octollm.JSONParser[json.RawMessage]{}, StreamingTypeJSON
 				default:
-					return &octollm.JSONParser[openai.ChatCompletionStreamChunk]{}
+					return &octollm.JSONParser[json.RawMessage]{}, StreamingTypeSSE
 				}
 			},
 		)

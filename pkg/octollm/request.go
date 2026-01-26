@@ -16,7 +16,7 @@ const (
 	APIFormatChatCompletions       APIFormat = "chat/completions"
 	APIFormatCompletions           APIFormat = "completions"
 	APIFormatClaudeMessages        APIFormat = "messages"
-	APIFormatVertexGenerateContent APIFormat = "vertex"
+	APIFormatGoogleGenerateContent APIFormat = "generateContent"
 	APIFormatEmbeddings            APIFormat = "embeddings"
 	APIFormatRerank                APIFormat = "rerank"
 )

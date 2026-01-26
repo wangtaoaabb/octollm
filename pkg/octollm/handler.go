@@ -1,6 +1,7 @@
 package octollm
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -28,7 +29,11 @@ func (s *Server) SetEngine(ep Engine) {
 	s.engine = ep
 }
 
-func httpHandler(engine Engine, format APIFormat, parser Parser) http.HandlerFunc {
+// httpSSEHandler handles HTTP requests with given engine.
+// It assumes the request body is in the given format, and the parser can parse the request body.
+// For the response, if the engine returns a stream channel, it will write the response as an event stream.
+// Otherwise, it will write the response as a plain text.
+func httpSSEHandler(engine Engine, format APIFormat, parser Parser) http.HandlerFunc {
 	return errutils.ErrorHandlingMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		u := NewRequest(r, format)
 		u.Body.SetParser(parser)
@@ -37,7 +42,6 @@ func httpHandler(engine Engine, format APIFormat, parser Parser) http.HandlerFun
 			logrus.WithContext(r.Context()).Errorf("Do error: %v", err)
 			httpErr := &errutils.UpstreamRespError{}
 			if errors.As(err, &httpErr) {
-				w.WriteHeader(httpErr.StatusCode)
 				for k, v := range httpErr.Header {
 					if k == "Content-Length" {
 						continue
@@ -104,25 +108,104 @@ func httpHandler(engine Engine, format APIFormat, parser Parser) http.HandlerFun
 
 // ChatCompletionsHandler handles OpenAI /v1/chat/completions requests
 func ChatCompletionsHandler(engine Engine) http.HandlerFunc {
-	return httpHandler(engine, APIFormatChatCompletions, &JSONParser[openai.ChatCompletionRequest]{})
+	return httpSSEHandler(engine, APIFormatChatCompletions, &JSONParser[openai.ChatCompletionRequest]{})
 }
 
 // CompletionsHandler handles OpenAI /v1/completions requests (legacy)
 func CompletionsHandler(engine Engine) http.HandlerFunc {
-	return httpHandler(engine, APIFormatCompletions, &JSONParser[openai.CompletionRequest]{})
+	return httpSSEHandler(engine, APIFormatCompletions, &JSONParser[openai.CompletionRequest]{})
 }
 
 // MessagesHandler handles Anthropic /v1/messages requests
 func MessagesHandler(engine Engine) http.HandlerFunc {
-	return httpHandler(engine, APIFormatClaudeMessages, &JSONParser[anthropic.ClaudeMessagesRequest]{})
+	return httpSSEHandler(engine, APIFormatClaudeMessages, &JSONParser[anthropic.ClaudeMessagesRequest]{})
 }
 
 // EmbeddingsHandler handles OpenAI /v1/embeddings requests
 func EmbeddingsHandler(engine Engine) http.HandlerFunc {
-	return httpHandler(engine, APIFormatEmbeddings, &JSONParser[openai.EmbeddingRequest]{})
+	return httpSSEHandler(engine, APIFormatEmbeddings, &JSONParser[openai.EmbeddingRequest]{})
 }
 
 // RerankHandler handles rerank requests
 func RerankHandler(engine Engine) http.HandlerFunc {
-	return httpHandler(engine, APIFormatRerank, &JSONParser[rerank.RerankRequest]{})
+	return httpSSEHandler(engine, APIFormatRerank, &JSONParser[rerank.RerankRequest]{})
+}
+
+// httpJSONArrayHandler handles HTTP requests with given engine.
+// It is like httpSSEHandler, but if the engine returns a stream channel, it will write the response as a streamed JSON array.
+// This is the format used by Google Vertex AI API.
+func httpJSONArrayHandler(engine Engine, format APIFormat, parser Parser) http.HandlerFunc {
+	return errutils.ErrorHandlingMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		u := NewRequest(r, format)
+		u.Body.SetParser(parser)
+		resp, err := engine.Process(u)
+		if err != nil {
+			logrus.WithContext(r.Context()).Errorf("Do error: %v", err)
+			httpErr := &errutils.UpstreamRespError{}
+			if errors.As(err, &httpErr) {
+				for k, v := range httpErr.Header {
+					if k == "Content-Length" {
+						continue
+					}
+					w.Header().Set(k, v[0])
+				}
+				w.WriteHeader(httpErr.StatusCode)
+				w.Write(httpErr.Body)
+				return
+			}
+			handlerErr := &errutils.HandlerError{}
+			if errors.As(err, &handlerErr) {
+				*r = *errutils.WithHandlerError(r, handlerErr)
+				return
+			}
+			*r = *errutils.WithError(r, err, http.StatusInternalServerError, "Internal Server Error")
+			return
+		}
+
+		// copy headers
+		for k, v := range resp.Header {
+			if k == "Content-Length" {
+				continue
+			}
+			w.Header().Set(k, v[0])
+		}
+		w.WriteHeader(http.StatusOK)
+		if resp.Stream != nil {
+			w.Write([]byte("["))
+			firstChunk := true
+			defer resp.Stream.Close()
+			for chunk := range resp.Stream.Chan() {
+				b, err := chunk.Body.Bytes()
+				if err != nil {
+					logrus.WithContext(r.Context()).Errorf("[httpHandler] Read chunk error: %v", err)
+					*r = *errutils.WithError(r, err, http.StatusInternalServerError, "Internal Server Error")
+					return
+				}
+
+				if !firstChunk {
+					w.Write([]byte(",\n"))
+				}
+				w.Write(b)
+				if flusher, ok := w.(http.Flusher); ok {
+					flusher.Flush()
+				}
+				logrus.WithContext(r.Context()).Debugf("[httpHandler] Write chunk: len=%d", len(b))
+			}
+			w.Write([]byte("]"))
+		} else if resp.Body != nil {
+			defer resp.Body.Close()
+			rd, err := resp.Body.Reader()
+			if err != nil {
+				logrus.WithContext(r.Context()).Errorf("[httpHandler] Read body error: %v", err)
+				*r = *errutils.WithError(r, err, http.StatusInternalServerError, "Internal Server Error")
+				return
+			}
+			io.Copy(w, rd)
+		}
+	})
+}
+
+// Vertex handles Google VertexAI requests
+func VertexAIHandler(engine Engine) http.HandlerFunc {
+	return httpJSONArrayHandler(engine, APIFormatGoogleGenerateContent, &JSONParser[json.RawMessage]{})
 }

@@ -15,12 +15,19 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+type StreamingType string
+
+const (
+	StreamingTypeSSE  StreamingType = "sse"
+	StreamingTypeJSON StreamingType = "json"
+)
+
 type HTTPEndpoint struct {
 	client          *http.Client
 	getURL          func(req *octollm.Request) (string, error)
 	reqModifier     func(req *octollm.Request, hreq *http.Request) *http.Request
 	nonstreamParser func(req *octollm.Request) octollm.Parser
-	streamParser    func(req *octollm.Request) octollm.Parser
+	streamParser    func(req *octollm.Request) (octollm.Parser, StreamingType)
 }
 
 // HTTPEndpoint implements octollm.Endpoint
@@ -45,7 +52,7 @@ func (e *HTTPEndpoint) WithRequestModifier(reqModifier func(req *octollm.Request
 	return e
 }
 
-func (e *HTTPEndpoint) WithParser(nonstreamParser, streamParser func(req *octollm.Request) octollm.Parser) *HTTPEndpoint {
+func (e *HTTPEndpoint) WithParser(nonstreamParser func(req *octollm.Request) octollm.Parser, streamParser func(req *octollm.Request) (octollm.Parser, StreamingType)) *HTTPEndpoint {
 	e.nonstreamParser = nonstreamParser
 	e.streamParser = streamParser
 	return e
@@ -138,77 +145,91 @@ func (e *HTTPEndpoint) Process(req *octollm.Request) (*octollm.Response, error) 
 	ch := make(chan *octollm.StreamChunk)
 	ctx, cancel := context.WithCancel(req.Context())
 	// use a scanner to read SSE messages
-	go func() {
-		defer close(ch)
-		defer resp.Body.Close()
-
-		metaBuffer := make(map[string]string)
-		bodyBuffer := make([]byte, 0, 512)
-
-		scanner := bufio.NewScanner(resp.Body)
-		for scanner.Scan() {
-			if ctx.Err() != nil {
-				logrus.WithContext(ctx).Infof("[http-endpoint] context error during stream response: %v", ctx.Err())
-				return
-			}
-			line := scanner.Bytes()
-
-			// process the line according to https://html.spec.whatwg.org/multipage/server-sent-events.html#event-stream-interpretation
-			if len(line) == 0 {
-				// dispatch the event and continue
-				body := octollm.NewBodyFromBytes(bodyBuffer, e.streamParser(req))
-				bodyLen := len(bodyBuffer)
-				bodyBuffer = make([]byte, 0, 512)
-				chunk := &octollm.StreamChunk{Body: body}
-				if len(metaBuffer) > 0 {
-					chunk.Metadata = metaBuffer
-					metaBuffer = make(map[string]string)
-				}
-				select {
-				case ch <- chunk:
-					logrus.WithContext(ctx).Debugf("[http-endpoint] pushed stream chunk: len=%d", bodyLen)
-				case <-ctx.Done():
-					logrus.WithContext(ctx).Infof("[http-endpoint] context error during stream response: %v", ctx.Err())
-					return
-				}
-				continue
-			}
-
-			colonIdx := slices.Index(line, ':')
-			if colonIdx == 0 {
-				continue
-			}
-			var key string
-			if colonIdx == -1 {
-				key = string(line)
-			} else {
-				key = string(line[:colonIdx])
-			}
-
-			switch key {
-			case "data":
-				// find the first non-space byte
-				start := slices.IndexFunc(line[colonIdx+1:], func(b byte) bool {
-					return b != ' '
-				})
-				if start != -1 {
-					bodyBuffer = append(bodyBuffer, line[colonIdx+1+start:]...)
-				}
-			case "event", "id":
-				value := strings.TrimLeft(string(line[colonIdx+1:]), " ")
-				metaBuffer[key] = value
-			default:
-				// ignore other fields
-				logrus.WithContext(ctx).Debugf("[http-endpoint] ignore event line because of unknown key %s", key)
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			logrus.WithContext(ctx).Warnf("[http-endpoint] scan response body error: %v", err)
-		}
-	}()
+	streamParser, streamingType := e.streamParser(req)
+	switch streamingType {
+	case StreamingTypeSSE:
+		go e.processSSEStream(ctx, resp, ch, streamParser)
+	case StreamingTypeJSON:
+		go e.processJSONStream(ctx, resp, ch, streamParser)
+	default:
+		return nil, fmt.Errorf("unsupported streaming type %s", streamingType)
+	}
 
 	logrus.WithContext(req.Context()).Debugf("[http-endpoint] returning stream response")
 	streamChan := octollm.NewStreamChan(ch, cancel)
 	llmresp := octollm.NewStreamResponse(resp.StatusCode, resp.Header, streamChan)
 	return llmresp, nil
+}
+
+func (e *HTTPEndpoint) processSSEStream(ctx context.Context, resp *http.Response, ch chan *octollm.StreamChunk, streamParser octollm.Parser) {
+	defer close(ch)
+	defer resp.Body.Close()
+
+	metaBuffer := make(map[string]string)
+	bodyBuffer := make([]byte, 0, 512)
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		if ctx.Err() != nil {
+			logrus.WithContext(ctx).Infof("[http-endpoint] context error during stream response: %v", ctx.Err())
+			return
+		}
+		line := scanner.Bytes()
+
+		// process the line according to https://html.spec.whatwg.org/multipage/server-sent-events.html#event-stream-interpretation
+		if len(line) == 0 {
+			// dispatch the event and continue
+			body := octollm.NewBodyFromBytes(bodyBuffer, streamParser)
+			bodyLen := len(bodyBuffer)
+			bodyBuffer = make([]byte, 0, 512)
+			chunk := &octollm.StreamChunk{Body: body}
+			if len(metaBuffer) > 0 {
+				chunk.Metadata = metaBuffer
+				metaBuffer = make(map[string]string)
+			}
+			select {
+			case ch <- chunk:
+				logrus.WithContext(ctx).Debugf("[http-endpoint] pushed stream chunk: len=%d", bodyLen)
+			case <-ctx.Done():
+				logrus.WithContext(ctx).Infof("[http-endpoint] context error during stream response: %v", ctx.Err())
+				return
+			}
+			continue
+		}
+
+		colonIdx := slices.Index(line, ':')
+		if colonIdx == 0 {
+			continue
+		}
+		var key string
+		if colonIdx == -1 {
+			key = string(line)
+		} else {
+			key = string(line[:colonIdx])
+		}
+
+		switch key {
+		case "data":
+			// find the first non-space byte
+			start := slices.IndexFunc(line[colonIdx+1:], func(b byte) bool {
+				return b != ' '
+			})
+			if start != -1 {
+				bodyBuffer = append(bodyBuffer, line[colonIdx+1+start:]...)
+			}
+		case "event", "id":
+			value := strings.TrimLeft(string(line[colonIdx+1:]), " ")
+			metaBuffer[key] = value
+		default:
+			// ignore other fields
+			logrus.WithContext(ctx).Debugf("[http-endpoint] ignore event line because of unknown key %s", key)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		logrus.WithContext(ctx).Warnf("[http-endpoint] scan response body error: %v", err)
+	}
+}
+
+func (e *HTTPEndpoint) processJSONStream(ctx context.Context, resp *http.Response, ch chan *octollm.StreamChunk, streamParser octollm.Parser) {
+	// TODO: implement
 }
