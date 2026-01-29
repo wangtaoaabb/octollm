@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/infinigence/octollm/pkg/octollm"
 	"github.com/infinigence/octollm/pkg/types/anthropic"
 	"github.com/infinigence/octollm/pkg/types/openai"
 	"github.com/infinigence/octollm/pkg/types/rerank"
+	"github.com/infinigence/octollm/pkg/types/vertex"
+	"github.com/sirupsen/logrus"
 )
 
 type GeneralEndpoint struct {
@@ -25,11 +28,14 @@ type GeneralEndpointConfig struct {
 	APIKey    string
 
 	AnthropicAPIKeyAsBearer bool
+
+	GoogleAPIKeyAsBearer bool
 }
 
 var DefaultURLPathChatCompletions = "/v1/chat/completions"
 var DefaultURLPathCompletions = "/v1/completions"
 var DefaultURLPathClaudeMessages = "/v1/messages"
+var DefaultURLPathVertex = "v1/models/{modelNameWithAction}" // Path for Vertex AI, {modelNameWithAction} includes action (e.g., "gemini-2.0-flash:generateContent")
 var DefaultURLPathEmbeddings = "/v1/embeddings"
 var DefaultURLPathRerank = "/v1/rerank"
 
@@ -54,6 +60,8 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 					endpoint = DefaultURLPathChatCompletions
 				case octollm.APIFormatCompletions:
 					endpoint = DefaultURLPathCompletions
+				case octollm.APIFormatGoogleGenerateContent:
+					endpoint = DefaultURLPathVertex
 				case octollm.APIFormatEmbeddings:
 					endpoint = DefaultURLPathEmbeddings
 				case octollm.APIFormatRerank:
@@ -62,6 +70,15 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 					return "", fmt.Errorf("invalid format: %s", req.Format)
 				}
 			}
+
+			if _, hasModel := octollm.GetCtxValue[string](req, octollm.ContextKeyModelName); hasModel {
+				newEndpoint, err := buildVertexEndpoint(endpoint, req)
+				if err != nil {
+					return "", fmt.Errorf("failed to build Vertex AI endpoint: %w", err)
+				}
+				endpoint = newEndpoint
+			}
+
 			return conf.BaseURL + endpoint, nil
 		}).
 		WithParser(
@@ -73,6 +90,8 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 					return &octollm.JSONParser[anthropic.ClaudeMessagesResponse]{}
 				case octollm.APIFormatCompletions:
 					return &octollm.JSONParser[openai.CompletionResponse]{}
+				case octollm.APIFormatGoogleGenerateContent:
+					return &octollm.JSONParser[vertex.GenerateContentResponse]{}
 				case octollm.APIFormatEmbeddings:
 					return &octollm.JSONParser[openai.EmbeddingResponse]{}
 				case octollm.APIFormatRerank:
@@ -90,7 +109,7 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 				case octollm.APIFormatClaudeMessages:
 					return &octollm.JSONParser[anthropic.ClaudeMessagesStreamEvent]{}, StreamingTypeSSE
 				case octollm.APIFormatGoogleGenerateContent:
-					return &octollm.JSONParser[json.RawMessage]{}, StreamingTypeJSON
+					return &octollm.JSONParser[vertex.StreamGenerateContentResponse]{}, StreamingTypeJSON
 				default:
 					return &octollm.JSONParser[json.RawMessage]{}, StreamingTypeSSE
 				}
@@ -99,10 +118,15 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 
 	if apiKey != "" {
 		httpEndpoint = httpEndpoint.WithRequestModifier(func(req *octollm.Request, httpReq *http.Request) *http.Request {
-
+			// Handle different authentication methods
 			if req.Format == octollm.APIFormatClaudeMessages && !conf.AnthropicAPIKeyAsBearer {
+				// Claude with x-api-key header
 				httpReq.Header.Set("x-api-key", apiKey)
+			} else if req.Format == octollm.APIFormatGoogleGenerateContent && !conf.GoogleAPIKeyAsBearer {
+				// Google Vertex AI with API Key
+				httpReq.Header.Set("x-goog-api-key", apiKey)
 			} else {
+				// Default: Bearer token for OpenAI, Google OAuth, and others
 				httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 			}
 			return httpReq
@@ -112,4 +136,26 @@ func NewGeneralEndpoint(conf GeneralEndpointConfig) *GeneralEndpoint {
 	return &GeneralEndpoint{
 		HTTPEndpoint: httpEndpoint,
 	}
+}
+
+func buildVertexEndpoint(endpoint string, req *octollm.Request) (string, error) {
+	// Get pure model name from context
+	modelName, ok := octollm.GetCtxValue[string](req, octollm.ContextKeyModelName)
+	if !ok || modelName == "" {
+		return "", fmt.Errorf("model name not found in Vertex AI request context")
+	}
+
+	// Get action from context if available
+	action, hasAction := octollm.GetCtxValue[string](req, octollm.ContextKeyAction)
+
+	// Build model name with action for endpoint replacement
+	modelNameWithAction := modelName
+	if hasAction && action != "" {
+		modelNameWithAction = modelName + ":" + action
+	}
+
+	endpoint = strings.ReplaceAll(endpoint, "{modelNameWithAction}", modelNameWithAction)
+	logrus.WithContext(req.Context()).Debugf("[buildVertexEndpoint] endpoint: %s", endpoint)
+
+	return endpoint, nil
 }

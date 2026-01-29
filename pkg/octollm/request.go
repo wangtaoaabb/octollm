@@ -130,11 +130,11 @@ func (b *UnifiedBody) Reader() (io.ReadCloser, error) {
 		return b.reader, nil
 	}
 
-	b1, err := b.Bytes()
+	data, err := b.Bytes()
 	if err != nil {
 		return nil, fmt.Errorf("get bytes error: %w", err)
 	}
-	return io.NopCloser(bytes.NewReader(b1)), nil
+	return io.NopCloser(bytes.NewReader(data)), nil
 }
 
 // SetParser set the parser and reset the cached state
@@ -225,6 +225,35 @@ func NewRequest(r *http.Request, format APIFormat) *Request {
 
 func (u *Request) Context() context.Context {
 	return u.ctx
+}
+
+// WithContext returns a shallow copy of u with its context changed to ctx.
+// The provided ctx must be non-nil.
+// This method follows the same pattern as http.Request.WithContext.
+func (u *Request) WithContext(ctx context.Context) *Request {
+	if ctx == nil {
+		panic("nil context")
+	}
+	u2 := new(Request)
+	*u2 = *u
+	u2.ctx = ctx
+	return u2
+}
+
+func GetCtxValue[T any](req *Request, key any) (T, bool) {
+	var zero T
+	if req == nil || req.ctx == nil {
+		return zero, false
+	}
+	raw := req.ctx.Value(key)
+	if raw == nil {
+		return zero, false
+	}
+	v, ok := raw.(T)
+	if !ok {
+		return zero, false
+	}
+	return v, true
 }
 
 func NewNonStreamResponse(statusCode int, header http.Header, body *UnifiedBody) *Response {

@@ -21,7 +21,7 @@ func NewServer(conf *composer.ConfigFile) *Server {
 	if err != nil {
 		logrus.WithError(err).Fatal("failed to update model repo from config")
 	}
-	ruleComposer := composer.NewRuleRepoFileBased(modelRepo, 5*time.Second, 10)
+	ruleComposer := composer.NewRuleRepoFileBased(modelRepo, 10*time.Second, 10)
 	err = ruleComposer.UpdateFromConfig(conf)
 	if err != nil {
 		logrus.WithError(err).Fatal("failed to update rule composer from config")
@@ -84,6 +84,17 @@ func (s *Server) RerankHandler() gin.HandlerFunc {
 
 		engine := s.ruleComposer.GetEngine(userName, orgName, "")
 		handler := octollm.RerankHandler(engine)
+		handler(c.Writer, c.Request)
+	}
+}
+
+func (s *Server) VertexAIHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		orgName := c.GetString("org")
+		userName := c.GetString("user")
+
+		engine := s.ruleComposer.GetEngine(userName, orgName, "")
+		handler := octollm.VertexAIHandler(engine)
 		handler(c.Writer, c.Request)
 	}
 }

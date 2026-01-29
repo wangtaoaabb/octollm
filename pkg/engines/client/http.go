@@ -3,6 +3,7 @@ package client
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
@@ -97,10 +98,6 @@ func (e *HTTPEndpoint) Process(req *octollm.Request) (*octollm.Response, error) 
 		httpReq = e.reqModifier(req, httpReq)
 	}
 
-	// log request
-	// body, _ := httputil.DumpRequest(httpReq, true)
-	// logrus.WithContext(req.Context()).Debugf("[http-endpoint] request: %s", string(body))
-
 	resp, err := e.client.Do(httpReq)
 	if err != nil {
 		return nil, &errutils.UpstreamHTTPError{
@@ -126,11 +123,18 @@ func (e *HTTPEndpoint) Process(req *octollm.Request) (*octollm.Response, error) 
 
 	ct := resp.Header.Get("Content-Type")
 	logrus.WithContext(req.Context()).Debugf("[http-endpoint] got response with status code %d, content-type %s", resp.StatusCode, ct)
+
+	// Determine if response is streaming
 	isStream := false
-	if mt, _, err := mime.ParseMediaType(ct); err == nil {
-		isStream = strings.EqualFold(mt, "text/event-stream")
+	if action, ok := octollm.GetCtxValue[string](req, octollm.ContextKeyAction); ok {
+		isStream = octollm.IsStreamAction(action)
 	} else {
-		isStream = strings.HasPrefix(strings.ToLower(ct), "text/event-stream")
+		// Fallback: use Content-Type header to determine stream mode
+		if mt, _, err := mime.ParseMediaType(ct); err == nil {
+			isStream = strings.EqualFold(mt, "text/event-stream")
+		} else {
+			isStream = strings.HasPrefix(strings.ToLower(ct), "text/event-stream")
+		}
 	}
 	if !isStream {
 		// non-stream
@@ -231,5 +235,55 @@ func (e *HTTPEndpoint) processSSEStream(ctx context.Context, resp *http.Response
 }
 
 func (e *HTTPEndpoint) processJSONStream(ctx context.Context, resp *http.Response, ch chan *octollm.StreamChunk, streamParser octollm.Parser) {
-	// TODO: implement
+	defer close(ch)
+	defer resp.Body.Close()
+
+	dec := json.NewDecoder(resp.Body)
+
+	// Read opening bracket '['
+	t, err := dec.Token()
+	if err != nil {
+		logrus.WithContext(ctx).Warnf("[http-endpoint] failed to read opening bracket: %v", err)
+		return
+	}
+
+	// Verify it's an array opening bracket
+	if delim, ok := t.(json.Delim); !ok || delim != '[' {
+		logrus.WithContext(ctx).Warnf("[http-endpoint] expected array opening bracket, got %T: %v", t, t)
+		return
+	}
+
+	// Read array elements
+	for dec.More() {
+		if ctx.Err() != nil {
+			logrus.WithContext(ctx).Infof("[http-endpoint] context error during JSON stream response: %v", ctx.Err())
+			return
+		}
+
+		// Decode one JSON object into RawMessage to preserve the raw bytes
+		var rawMsg json.RawMessage
+		if err := dec.Decode(&rawMsg); err != nil {
+			logrus.WithContext(ctx).Warnf("[http-endpoint] failed to decode JSON object: %v", err)
+			return
+		}
+
+		// Create chunk from raw JSON bytes
+		body := octollm.NewBodyFromBytes(rawMsg, streamParser)
+		chunk := &octollm.StreamChunk{Body: body}
+
+		select {
+		case ch <- chunk:
+			logrus.WithContext(ctx).Debugf("[http-endpoint] pushed JSON stream chunk: len=%d", len(rawMsg))
+		case <-ctx.Done():
+			logrus.WithContext(ctx).Infof("[http-endpoint] context error during JSON stream response: %v", ctx.Err())
+			return
+		}
+	}
+
+	// Read closing bracket ']'
+	t, err = dec.Token()
+	if err != nil {
+		logrus.WithContext(ctx).Warnf("[http-endpoint] failed to read closing bracket: %v", err)
+		return
+	}
 }

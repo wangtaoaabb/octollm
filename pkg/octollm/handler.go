@@ -1,17 +1,26 @@
 package octollm
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/infinigence/octollm/pkg/errutils"
 	"github.com/infinigence/octollm/pkg/types/anthropic"
 	"github.com/infinigence/octollm/pkg/types/openai"
 	"github.com/infinigence/octollm/pkg/types/rerank"
+	"github.com/infinigence/octollm/pkg/types/vertex"
 	"github.com/sirupsen/logrus"
+)
+
+type contextKey string
+
+const (
+	ContextKeyModelName contextKey = "model_name"
+	ContextKeyAction    contextKey = "action"
 )
 
 type Server struct {
@@ -186,6 +195,7 @@ func httpJSONArrayHandler(engine Engine, format APIFormat, parser Parser) http.H
 					w.Write([]byte(",\n"))
 				}
 				w.Write(b)
+				firstChunk = false // Mark that we've written the first chunk
 				if flusher, ok := w.(http.Flusher); ok {
 					flusher.Flush()
 				}
@@ -205,7 +215,40 @@ func httpJSONArrayHandler(engine Engine, format APIFormat, parser Parser) http.H
 	})
 }
 
-// Vertex handles Google VertexAI requests
+func IsStreamAction(action string) bool {
+	return strings.HasPrefix(strings.ToLower(action), "stream")
+}
+
+// VertexAIHandler handles Google VertexAI/Gemini generateContent requests
 func VertexAIHandler(engine Engine) http.HandlerFunc {
-	return httpJSONArrayHandler(engine, APIFormatGoogleGenerateContent, &JSONParser[json.RawMessage]{})
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		modelName, action := extractVertexModelFromURL(r.URL.Path)
+
+		ctx = context.WithValue(ctx, ContextKeyModelName, modelName)
+		ctx = context.WithValue(ctx, ContextKeyAction, action)
+
+		r = r.WithContext(ctx)
+		httpJSONArrayHandler(engine, APIFormatGoogleGenerateContent, &JSONParser[vertex.GenerateContentRequest]{})(w, r)
+	}
+}
+
+func extractVertexModelFromURL(path string) (modelName string, action string) {
+	modelsIdx := strings.LastIndex(path, "/models/")
+	if modelsIdx == -1 {
+		return "", ""
+	}
+
+	// Extract everything after "/models/"
+	afterModels := path[modelsIdx+8:]
+
+	colonIdx := strings.Index(afterModels, ":")
+	if colonIdx == -1 {
+		return "", ""
+	}
+
+	modelName = afterModels[:colonIdx]
+	action = afterModels[colonIdx+1:]
+
+	return modelName, action
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/infinigence/octollm/pkg/types/anthropic"
 	"github.com/infinigence/octollm/pkg/types/openai"
 	"github.com/infinigence/octollm/pkg/types/rerank"
+	"github.com/infinigence/octollm/pkg/types/vertex"
 )
 
 type RuleComposerFileBased struct {
@@ -264,28 +265,36 @@ var _ octollm.Engine = (*RuleComposerEngine)(nil)
 
 func (r *RuleComposerEngine) Process(req *octollm.Request) (*octollm.Response, error) {
 	if r.Model == "" {
-		// extract from request
-		body, err := req.Body.Parsed()
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse request body: %w", err)
-		}
-		switch body := body.(type) {
-		case *openai.ChatCompletionRequest:
-			r.Model = body.Model
-		case *openaiSDK.ChatCompletionNewParams:
-			r.Model = body.Model
-		case *openai.CompletionRequest:
-			r.Model = body.Model
-		case *openai.EmbeddingRequest:
-			r.Model = body.Model
-		case *rerank.RerankRequest:
-			r.Model = body.Model
-		case *anthropic.ClaudeMessagesRequest:
-			r.Model = body.Model
-		case *anthropicSDK.MessageNewParams:
-			r.Model = string(body.Model)
-		default:
-			return nil, fmt.Errorf("unsupported model request type: %T", body)
+		// Try to get model from context (fallback for URL-based protocols)
+		if modelName, ok := octollm.GetCtxValue[string](req, octollm.ContextKeyModelName); ok && modelName != "" {
+			r.Model = modelName
+		} else {
+			body, err := req.Body.Parsed()
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse request body: %w", err)
+			}
+			switch body := body.(type) {
+			case *openai.ChatCompletionRequest:
+				r.Model = body.Model
+			case *openaiSDK.ChatCompletionNewParams:
+				r.Model = body.Model
+			case *openai.CompletionRequest:
+				r.Model = body.Model
+			case *openai.EmbeddingRequest:
+				r.Model = body.Model
+			case *rerank.RerankRequest:
+				r.Model = body.Model
+			case *anthropic.ClaudeMessagesRequest:
+				r.Model = body.Model
+			case *anthropicSDK.MessageNewParams:
+				r.Model = string(body.Model)
+			case *vertex.GenerateContentRequest:
+				// For Vertex AI, model should already be pre-set in server.go or extracted from context.
+				// If we reach here, it means neither happened.
+				return nil, fmt.Errorf("vertex AI model should be pre-set or extracted from URL/context, but is missing")
+			default:
+				return nil, fmt.Errorf("unsupported model request type: %T", body)
+			}
 		}
 	}
 
