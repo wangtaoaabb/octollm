@@ -11,7 +11,7 @@ type ClaudeMessagesResponse struct {
 	Role         string           `json:"role"`
 	Content      []MessageContent `json:"content"`
 	Model        string           `json:"model"`
-	StopReason   string           `json:"stop_reason"`
+	StopReason   string           `json:"stop_reason,omitempty"`
 	StopSequence *string          `json:"stop_sequence,omitempty"`
 	Usage        *Usage           `json:"usage"`
 }
@@ -73,7 +73,7 @@ type ClaudeMessagesStreamEvent struct {
 	// For content_block_start event
 	Index *int `json:"index,omitempty"`
 
-	ContentBlock MessageContent  `json:"-"`
+	ContentBlock MessageContent  `json:"content_block,omitempty"`
 	DeltaRaw     json.RawMessage `json:"delta,omitempty"`
 	Usage        *Usage          `json:"usage,omitempty"`
 	Error        *APIError       `json:"error,omitempty"`
