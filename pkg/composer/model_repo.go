@@ -101,6 +101,8 @@ func (m *ModelRepoFileBased) UpdateFromConfig(conf *ConfigFile) error {
 			finalBackend.ResponseRewrites = finalBackend.ResponseRewrites.Merge(backend.ResponseRewrites)
 			finalBackend.StreamChunkRewrites = finalBackend.StreamChunkRewrites.Merge(backend.StreamChunkRewrites)
 
+			finalBackend.PostRequestRewrites = finalBackend.PostRequestRewrites.Merge(backend.PostRequestRewrites)
+
 			newBackends[modelName][backendName] = &finalBackend
 		}
 	}
@@ -227,6 +229,14 @@ func (m *ModelRepoFileBased) BuildEngineByBackend(b *Backend) (octollm.Engine, e
 	if b.HTTPProxy != nil {
 		httpCli := m.cliManager.GetClient(*b.HTTPProxy)
 		llmEngine = llmGE.WithClient(httpCli)
+	}
+
+	if b.PostRequestRewrites != nil {
+		llmEngine = engines.NewRewriteEngine(
+			llmEngine,
+			b.PostRequestRewrites,
+			nil,
+			nil)
 	}
 
 	if b.ConvertToMessages != "" {

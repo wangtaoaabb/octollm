@@ -14,6 +14,9 @@ models:
       default:1: 
         use: infini
         convert_to_messages: from_chat
+        post_request_rewrites:
+          set_keys:
+            stream: true
   deepseek-v3:
     access: internal
     backends:
