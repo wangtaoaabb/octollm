@@ -9,6 +9,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/infinigence/octollm/pkg/composer"
 	"github.com/sirupsen/logrus"
+
+	_ "net/http/pprof"
 )
 
 func main() {
@@ -23,6 +25,13 @@ func main() {
 	conf, err := composer.ReadConfigFile(configFile)
 	if err != nil {
 		logrus.WithError(err).Fatal("failed to read config file")
+	}
+
+	// Start pprof server
+	if conf.PprofAddr != "" {
+		go func() {
+			log.Println(http.ListenAndServe(conf.PprofAddr, nil))
+		}()
 	}
 
 	s := NewServer(conf)
@@ -45,6 +54,9 @@ func main() {
 	// This matches Google's API format where the action is part of the model identifier
 	r.POST("/v1/models/:modelNameWithAction", s.VertexAIHandler())
 
-	log.Println("listening :8080")
-	log.Fatal(http.ListenAndServe(":8080", r))
+	if conf.ListenAddr == "" {
+		conf.ListenAddr = ":8080"
+	}
+	log.Println("listening " + conf.ListenAddr)
+	log.Fatal(http.ListenAndServe(conf.ListenAddr, r))
 }

@@ -99,6 +99,9 @@ type ConfigFile struct {
 	GlobalBackends map[string]*Backend `json:"backends" yaml:"backends"`
 	Models         map[string]*Model   `json:"models" yaml:"models"`
 	Users          map[string]*UserOrg `json:"users" yaml:"users"`
+
+	ListenAddr string `json:"listen_addr" yaml:"listen_addr"`
+	PprofAddr  string `json:"pprof_addr" yaml:"pprof_addr"`
 }
 
 func ReadConfigFile(path string) (*ConfigFile, error) {
