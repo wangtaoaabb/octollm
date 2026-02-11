@@ -54,6 +54,14 @@ func NewBodyFromBytes(bytes []byte, parser Parser) *UnifiedBody {
 	}
 }
 
+func NewBodyFromParsed(parsed any, parser Parser) *UnifiedBody {
+	return &UnifiedBody{
+		parsed:  parsed,
+		parser:  parser,
+		isDirty: true,
+	}
+}
+
 // Parsed lazily parses the body and returns the parsed data.
 // It caches the parsed data and error for future calls.
 func (b *UnifiedBody) Parsed() (any, error) {

@@ -8,6 +8,7 @@
 # Build artifacts
 main
 octollm-server
+mock
 
 # Config files
 config.yaml
