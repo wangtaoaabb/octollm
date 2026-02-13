@@ -69,6 +69,9 @@ func (m *ModelRepoFileBased) UpdateFromConfig(conf *ConfigFile) error {
 					finalBackend.ExtraHeaders[k] = v
 				}
 			}
+			if backend.PassThroughHeaders != nil {
+				finalBackend.PassThroughHeaders = backend.PassThroughHeaders
+			}
 			if backend.URLPathChat != nil {
 				finalBackend.URLPathChat = backend.URLPathChat
 			}
@@ -256,10 +259,11 @@ func (m *ModelRepoFileBased) BuildEngineByBackend(b *Backend) (octollm.Engine, e
 		}
 	}
 
-	if len(b.ExtraHeaders) > 0 {
+	if len(b.ExtraHeaders) > 0 || len(b.PassThroughHeaders) > 0 {
 		llmEngine = &engines.AddHeaderEngine{
-			Header: b.ExtraHeaders,
-			Next:   llmEngine,
+			PassThroughHeaders: b.PassThroughHeaders,
+			SetHeaders:         b.ExtraHeaders,
+			Next:               llmEngine,
 		}
 	}
 
