@@ -3,7 +3,9 @@ package octollm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -13,7 +15,6 @@ import (
 	"github.com/infinigence/octollm/pkg/types/openai"
 	"github.com/infinigence/octollm/pkg/types/rerank"
 	"github.com/infinigence/octollm/pkg/types/vertex"
-	"github.com/sirupsen/logrus"
 )
 
 type contextKey string
@@ -51,7 +52,7 @@ func httpSSEHandler(engine Engine, format APIFormat, parser Parser) http.Handler
 		u.Body.SetParser(parser)
 		resp, err := engine.Process(u)
 		if err != nil {
-			logrus.WithContext(r.Context()).Errorf("Do error: %v", err)
+			slog.ErrorContext(r.Context(), fmt.Sprintf("Do error: %v", err))
 			httpErr := &errutils.UpstreamRespError{}
 			if errors.As(err, &httpErr) {
 				for k, v := range httpErr.Header {
@@ -86,7 +87,7 @@ func httpSSEHandler(engine Engine, format APIFormat, parser Parser) http.Handler
 			for chunk := range resp.Stream.Chan() {
 				b, err := chunk.Body.Bytes()
 				if err != nil {
-					logrus.WithContext(r.Context()).Errorf("[httpHandler] Read chunk error: %v", err)
+					slog.ErrorContext(r.Context(), fmt.Sprintf("[httpHandler] Read chunk error: %v", err))
 					*r = *errutils.WithError(r, err, http.StatusInternalServerError, "Internal Server Error")
 					return
 				}
@@ -103,13 +104,13 @@ func httpSSEHandler(engine Engine, format APIFormat, parser Parser) http.Handler
 				if flusher, ok := w.(http.Flusher); ok {
 					flusher.Flush()
 				}
-				logrus.WithContext(r.Context()).Debugf("[httpHandler] Write chunk: len=%d", len(b))
+				slog.DebugContext(r.Context(), fmt.Sprintf("[httpHandler] Write chunk: len=%d", len(b)))
 			}
 		} else if resp.Body != nil {
 			defer resp.Body.Close()
 			rd, err := resp.Body.Reader()
 			if err != nil {
-				logrus.WithContext(r.Context()).Errorf("[httpHandler] Read body error: %v", err)
+				slog.ErrorContext(r.Context(), fmt.Sprintf("[httpHandler] Read body error: %v", err))
 				*r = *errutils.WithError(r, err, http.StatusInternalServerError, "Internal Server Error")
 				return
 			}
@@ -154,7 +155,7 @@ func httpJSONArrayHandler(engine Engine, format APIFormat, parser Parser) http.H
 		u.Body.SetParser(parser)
 		resp, err := engine.Process(u)
 		if err != nil {
-			logrus.WithContext(r.Context()).Errorf("Do error: %v", err)
+			slog.ErrorContext(r.Context(), fmt.Sprintf("Do error: %v", err))
 			httpErr := &errutils.UpstreamRespError{}
 			if errors.As(err, &httpErr) {
 				for k, v := range httpErr.Header {
@@ -191,7 +192,7 @@ func httpJSONArrayHandler(engine Engine, format APIFormat, parser Parser) http.H
 			for chunk := range resp.Stream.Chan() {
 				b, err := chunk.Body.Bytes()
 				if err != nil {
-					logrus.WithContext(r.Context()).Errorf("[httpHandler] Read chunk error: %v", err)
+					slog.ErrorContext(r.Context(), fmt.Sprintf("[httpHandler] Read chunk error: %v", err))
 					*r = *errutils.WithError(r, err, http.StatusInternalServerError, "Internal Server Error")
 					return
 				}
@@ -204,14 +205,14 @@ func httpJSONArrayHandler(engine Engine, format APIFormat, parser Parser) http.H
 				if flusher, ok := w.(http.Flusher); ok {
 					flusher.Flush()
 				}
-				logrus.WithContext(r.Context()).Debugf("[httpHandler] Write chunk: len=%d", len(b))
+				slog.DebugContext(r.Context(), fmt.Sprintf("[httpHandler] Write chunk: len=%d", len(b)))
 			}
 			w.Write([]byte("]"))
 		} else if resp.Body != nil {
 			defer resp.Body.Close()
 			rd, err := resp.Body.Reader()
 			if err != nil {
-				logrus.WithContext(r.Context()).Errorf("[httpHandler] Read body error: %v", err)
+				slog.ErrorContext(r.Context(), fmt.Sprintf("[httpHandler] Read body error: %v", err))
 				*r = *errutils.WithError(r, err, http.StatusInternalServerError, "Internal Server Error")
 				return
 			}

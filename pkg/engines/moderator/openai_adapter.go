@@ -3,10 +3,10 @@ package moderator
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/infinigence/octollm/pkg/octollm"
 	"github.com/infinigence/octollm/pkg/types/openai"
-	"github.com/sirupsen/logrus"
 )
 
 type OpenAIAdapter struct {
@@ -112,7 +112,7 @@ func (a *OpenAIAdapter) extractTextFromMessage(msg *openai.Message) []rune {
 func (a *OpenAIAdapter) GetReplacementBody(ctx context.Context, body *octollm.UnifiedBody) *octollm.UnifiedBody {
 	parsed, err := body.Parsed()
 	if err != nil {
-		logrus.WithContext(ctx).Debugf("parse body error: %s", err)
+		slog.DebugContext(ctx, fmt.Sprintf("parse body error: %s", err))
 		return nil
 	}
 	switch parsed := parsed.(type) {

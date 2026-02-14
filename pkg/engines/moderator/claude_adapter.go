@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/infinigence/octollm/pkg/octollm"
 	"github.com/infinigence/octollm/pkg/types/anthropic"
-	"github.com/sirupsen/logrus"
 )
 
 type ClaudeAdapter struct {
@@ -119,7 +119,7 @@ func (a *ClaudeAdapter) extractTextFromStreamResponse(ctx context.Context, body 
 func (a *ClaudeAdapter) GetReplacementBody(ctx context.Context, body *octollm.UnifiedBody) *octollm.UnifiedBody {
 	parsed, err := body.Parsed()
 	if err != nil {
-		logrus.WithContext(ctx).Debugf("parse body error: %s", err)
+		slog.DebugContext(ctx, fmt.Sprintf("parse body error: %s", err))
 		return nil
 	}
 	switch parsed := parsed.(type) {
@@ -180,7 +180,7 @@ func (a *ClaudeAdapter) getReplacementStreamResponse(ctx context.Context, event 
 
 	deltaRaw, err := json.Marshal(delta)
 	if err != nil {
-		logrus.WithContext(ctx).Debugf("failed to marshal delta: %s", err)
+		slog.DebugContext(ctx, fmt.Sprintf("failed to marshal delta: %s", err))
 		return nil
 	}
 

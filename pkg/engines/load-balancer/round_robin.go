@@ -2,12 +2,12 @@ package loadbalancer
 
 import (
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"sync"
 	"time"
 
 	"github.com/infinigence/octollm/pkg/octollm"
-	"github.com/sirupsen/logrus"
 )
 
 type BackendItem struct {
@@ -94,7 +94,7 @@ func (l *WeightedRoundRobin) Process(req *octollm.Request) (*octollm.Response, e
 	retryCount := 0
 	for {
 		n, eng := l.GetNextEngine()
-		logrus.WithContext(req.Context()).Infof("[WRR load balancer] will use engine name: %s", n)
+		slog.InfoContext(req.Context(), fmt.Sprintf("[WRR load balancer] will use engine name: %s", n))
 		resp, err := eng.Process(req)
 		if err == nil {
 			resp.SetMetadataValue(backendName, n)
@@ -102,16 +102,14 @@ func (l *WeightedRoundRobin) Process(req *octollm.Request) (*octollm.Response, e
 		}
 		retryCount++
 		if time.Since(start) >= l.retryTimeout {
-			// retry peroid reached, return last resp and err
-			logrus.WithContext(req.Context()).Warnf("[WRR load balancer] retry peroid %v reached, return last resp and err", l.retryTimeout)
+			slog.WarnContext(req.Context(), fmt.Sprintf("[WRR load balancer] retry peroid %v reached, return last resp and err", l.retryTimeout))
 			return resp, err
 		}
 		if retryCount >= l.retryMaxCount {
-			// retry max count reached, return last resp and err
-			logrus.WithContext(req.Context()).Warnf("[WRR load balancer] retry max count %d reached, return last resp and err", l.retryMaxCount)
+			slog.WarnContext(req.Context(), fmt.Sprintf("[WRR load balancer] retry max count %d reached, return last resp and err", l.retryMaxCount))
 			return resp, err
 		}
-		logrus.WithContext(req.Context()).Infof("[WRR load balancer] will retry, count %d, time %v", retryCount, time.Since(start))
+		slog.InfoContext(req.Context(), fmt.Sprintf("[WRR load balancer] will retry, count %d, time %v", retryCount, time.Since(start)))
 	}
 }
 

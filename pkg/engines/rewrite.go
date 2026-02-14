@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+
 	"github.com/expr-lang/expr"
 	"github.com/infinigence/octollm/pkg/octollm"
-	"github.com/sirupsen/logrus"
 	"github.com/tidwall/sjson"
 )
 
@@ -66,38 +67,36 @@ func (r *llmJSONRewriter) RewriteJSON(reqBody []byte) []byte {
 	for _, k := range r.policy.RemoveKeys {
 		reqBody, err = sjson.DeleteBytes(reqBody, k)
 		if err != nil {
-			logrus.WithContext(r.ctx).Warnf("[llmJSONRewriter.RewriteJSON] delete key (%s) body error: %s", k, err)
+			slog.WarnContext(r.ctx, fmt.Sprintf("[llmJSONRewriter.RewriteJSON] delete key (%s) body error: %s", k, err))
 		}
 	}
 
 	for k, v := range r.policy.SetKeys {
 		reqBody, err = sjson.SetBytes(reqBody, k, v)
 		if err != nil {
-			logrus.WithContext(r.ctx).Warnf("[llmJSONRewriter.RewriteJSON] set key (%s) error: %s", k, err)
+			slog.WarnContext(r.ctx, fmt.Sprintf("[llmJSONRewriter.RewriteJSON] set key (%s) error: %s", k, err))
 		}
 	}
 
 	for k, code := range r.policy.SetKeysByExpr {
 		prog, err := expr.Compile(code, expr.Env(r.exprEnv))
 		if err != nil {
-			logrus.WithContext(r.ctx).Warnf("[llmJSONRewriter.RewriteJSON] compile expr (%s) error: %s", code, err)
+			slog.WarnContext(r.ctx, fmt.Sprintf("[llmJSONRewriter.RewriteJSON] compile expr (%s) error: %s", code, err))
 			continue
 		}
-		// 执行表达式
 		v, err := expr.Run(prog, r.exprEnv)
 		if err != nil {
-			logrus.WithContext(r.ctx).Warnf("[llmJSONRewriter.RewriteJSON] run expr (%s) error: %s", code, err)
+			slog.WarnContext(r.ctx, fmt.Sprintf("[llmJSONRewriter.RewriteJSON] run expr (%s) error: %s", code, err))
 			continue
 		}
-		// 把输出结果设置到json中
 		if v != nil {
 			reqBody, err = sjson.SetBytes(reqBody, k, v)
 			if err != nil {
-				logrus.WithContext(r.ctx).Warnf("[llmJSONRewriter.RewriteJSON] set key (%s) error: %s", k, err)
+				slog.WarnContext(r.ctx, fmt.Sprintf("[llmJSONRewriter.RewriteJSON] set key (%s) error: %s", k, err))
 			}
-			logrus.WithContext(r.ctx).Debugf("[llmJSONRewriter.RewriteJSON] set key (%s) value (%v)", k, v)
+			slog.DebugContext(r.ctx, fmt.Sprintf("[llmJSONRewriter.RewriteJSON] set key (%s) value (%v)", k, v))
 		} else {
-			logrus.WithContext(r.ctx).Debugf("[llmJSONRewriter.RewriteJSON] skip setting key (%s) because expr result is nil", k)
+			slog.DebugContext(r.ctx, fmt.Sprintf("[llmJSONRewriter.RewriteJSON] skip setting key (%s) because expr result is nil", k))
 		}
 	}
 
@@ -131,7 +130,7 @@ func buildExprEnv(req *octollm.Request) (map[string]any, error) {
 		return nil, fmt.Errorf("get request body bytes error: %w", err)
 	}
 	if err := json.Unmarshal(b, &rawReq); err != nil {
-		logrus.WithContext(req.Context()).Warnf("[RewriteEngine.Process] unmarshal request body for expr env error:%s", err)
+		slog.WarnContext(req.Context(), fmt.Sprintf("[RewriteEngine.Process] unmarshal request body for expr env error:%s", err))
 		rawReq = make(map[string]any)
 	}
 	exprEnv["RawReq"] = rawReq
@@ -155,7 +154,7 @@ func (e *RewriteEngine) Process(req *octollm.Request) (*octollm.Response, error)
 			return nil, fmt.Errorf("get request body bytes error: %w", err)
 		}
 		req.Body.SetBytes(reqRewriter.RewriteJSON(b))
-		logrus.WithContext(req.Context()).Debugf("[RewriteEngine.Run] request body rewritten")
+		slog.DebugContext(req.Context(), "[RewriteEngine.Run] request body rewritten")
 	}
 	if e.Next == nil {
 		return nil, fmt.Errorf("next engine is nil")
@@ -183,19 +182,19 @@ func (e *RewriteEngine) Process(req *octollm.Request) (*octollm.Response, error)
 			for chunk := range originalStream.Chan() {
 				b, err := chunk.Body.Bytes()
 				if err != nil {
-					logrus.WithContext(ctx).Warnf("read stream chunk error: %s", err)
+					slog.WarnContext(ctx, fmt.Sprintf("read stream chunk error: %s", err))
 					continue
 				}
 				chunk.Body.SetBytes(chunkRewriter.RewriteJSON(b))
 				select {
 				case rewritenChunk <- chunk:
 				case <-ctx.Done():
-					logrus.WithContext(ctx).Debugf("stream chunk rewrite context canceled")
+					slog.DebugContext(ctx, "stream chunk rewrite context canceled")
 					return
 				}
 			}
 		}()
-		logrus.WithContext(req.Context()).Debugf("[RewriteEngine.Run] stream chunk rewritten")
+		slog.DebugContext(req.Context(), "[RewriteEngine.Run] stream chunk rewritten")
 		resp.Stream = octollm.NewStreamChan(rewritenChunk, func() {
 			originalStream.Close()
 			cancel()
@@ -214,7 +213,7 @@ func (e *RewriteEngine) Process(req *octollm.Request) (*octollm.Response, error)
 			return nil, fmt.Errorf("read response body error: %w", err)
 		}
 		resp.Body.SetBytes(respRewriter.RewriteJSON(b))
-		logrus.WithContext(req.Context()).Debugf("[RewriteEngine.Run] non-stream response body rewritten")
+		slog.DebugContext(req.Context(), "[RewriteEngine.Run] non-stream response body rewritten")
 	}
 
 	return resp, nil

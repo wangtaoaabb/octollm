@@ -3,9 +3,9 @@ package errutils
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
-
-	"github.com/sirupsen/logrus"
 )
 
 type ContextKey string
@@ -45,7 +45,7 @@ func ErrorHandlingMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		next.ServeHTTP(w, r)
 
 		if err, ok := r.Context().Value(errorKey).(*HandlerError); ok {
-			logrus.WithContext(r.Context()).Errorf("Handler error: %v (returned as: %v)", err.Err, err.Message)
+			slog.ErrorContext(r.Context(), fmt.Sprintf("Handler error: %v (returned as: %v)", err.Err, err.Message))
 
 			w.WriteHeader(err.StatusCode)
 			_ = json.NewEncoder(w).Encode(map[string]string{

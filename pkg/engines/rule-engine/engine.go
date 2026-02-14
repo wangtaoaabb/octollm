@@ -3,9 +3,9 @@ package ruleengine
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/infinigence/octollm/pkg/octollm"
-	"github.com/sirupsen/logrus"
 )
 
 type Matcher interface {
@@ -59,21 +59,21 @@ func (e *RuleEngine) Process(req *octollm.Request) (*octollm.Response, error) {
 		}
 	}
 
-	logrus.WithContext(req.Context()).Debugf("[rule-engine] executing default rule chain")
+	slog.DebugContext(req.Context(), "[rule-engine] executing default rule chain")
 	for _, r := range currChain {
-		logrus.WithContext(req.Context()).Debugf("[rule-engine] going to match rule %s", r.Name)
+		slog.DebugContext(req.Context(), fmt.Sprintf("[rule-engine] going to match rule %s", r.Name))
 		if !r.Matcher.Match(req) {
 			continue
 		}
-		logrus.WithContext(req.Context()).Debugf("[rule-engine] rule %s matched, executing", r.Name)
+		slog.DebugContext(req.Context(), fmt.Sprintf("[rule-engine] rule %s matched, executing", r.Name))
 		resp, err := r.Engine.Process(req)
 		if err == nil {
 			resp.SetMetadataValue(matchedRuleName, r.Name)
-			logrus.WithContext(req.Context()).Debugf("[rule-engine] rule %s exec success", r.Name)
+			slog.DebugContext(req.Context(), fmt.Sprintf("[rule-engine] rule %s exec success", r.Name))
 			return resp, nil
 		}
 
-		logrus.WithContext(req.Context()).Errorf("[rule-engine] rule %s exec error: %s", r.Name, err.Error())
+		slog.ErrorContext(req.Context(), fmt.Sprintf("[rule-engine] rule %s exec error: %s", r.Name, err.Error()))
 		eAct := &ErrWithAction{}
 		if !errors.As(err, &eAct) {
 			return nil, fmt.Errorf("%w: %w", ErrRuleActionError, err)
@@ -81,7 +81,7 @@ func (e *RuleEngine) Process(req *octollm.Request) (*octollm.Response, error) {
 
 		switch eAct.Action {
 		case RuleEngineActionContinue:
-			logrus.WithContext(req.Context()).Debugf("[rule-engine] continue to next rule")
+			slog.DebugContext(req.Context(), "[rule-engine] continue to next rule")
 			continue
 		default:
 			return nil, fmt.Errorf("%w: %w", ErrRuleActionError, err)

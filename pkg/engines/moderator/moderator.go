@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/infinigence/octollm/pkg/octollm"
-	"github.com/sirupsen/logrus"
 )
 
 var (
@@ -103,21 +103,21 @@ func (e *TextModeratorEngine) Process(req *octollm.Request) (*octollm.Response, 
 		chunkBuffer := make([]*octollm.StreamChunk, 0, moderateEvery)
 		chunkCountSinceLast := 0
 
-		logrus.WithContext(ctx).Debugf("[moderate] begin reading upstream stream")
+		slog.DebugContext(ctx, fmt.Sprintf("[moderate] begin reading upstream stream"))
 		for chunk := range originalChunks.Chan() {
-			logrus.WithContext(ctx).Debugf("[moderate] stream chunk")
+			slog.DebugContext(ctx, fmt.Sprintf("[moderate] stream chunk"))
 			text, err := e.TextModeratorAdapter.ExtractTextFromBody(ctx, chunk.Body)
 			if err != nil {
 				// stream done 是正常结束信号，不应该视为错误
 				if errors.Is(err, octollm.ErrStreamDone) {
-					logrus.WithContext(ctx).Debugf("stream done, will process remaining chunks")
+					slog.DebugContext(ctx, fmt.Sprintf("stream done, will process remaining chunks"))
 					break
 				}
-				logrus.WithContext(ctx).Debugf("extract text from stream chunk error: %s", err)
+				slog.DebugContext(ctx, fmt.Sprintf("extract text from stream chunk error: %s", err))
 				moderationFailedErr = fmt.Errorf("%w: %w", ErrModeratorInternalError, err)
 				break
 			}
-			logrus.WithContext(ctx).Debugf("[moderate] extract text from stream chunk: %s", string(text))
+			slog.DebugContext(ctx, fmt.Sprintf("[moderate] extract text from stream chunk: %s", string(text)))
 			textBuffer = append(textBuffer, text...)
 			if len(textBuffer) > maxRuneLen {
 				// truncate text to last max rune len
@@ -127,7 +127,7 @@ func (e *TextModeratorEngine) Process(req *octollm.Request) (*octollm.Response, 
 			chunkCountSinceLast++
 			if chunkCountSinceLast >= moderateEvery {
 				if err := e.ModeratorService.Allow(ctx, textBuffer); err != nil {
-					logrus.WithContext(ctx).Debugf("moderate stream chunk error: %s", err)
+					slog.DebugContext(ctx, fmt.Sprintf("moderate stream chunk error: %s", err))
 					moderationFailedErr = fmt.Errorf("%w: %w", ErrOutputNotAllowed, err)
 					break
 				}
@@ -145,9 +145,9 @@ func (e *TextModeratorEngine) Process(req *octollm.Request) (*octollm.Response, 
 
 		// Handle remaining chunks after stream ends
 		if moderationFailedErr == nil && len(chunkBuffer) > 0 {
-			logrus.WithContext(ctx).Debugf("[moderate] processing %d remaining chunks", len(chunkBuffer))
+			slog.DebugContext(ctx, fmt.Sprintf("[moderate] processing %d remaining chunks", len(chunkBuffer)))
 			if err := e.ModeratorService.Allow(ctx, textBuffer); err != nil {
-				logrus.WithContext(ctx).Debugf("moderate remaining stream chunks error: %s", err)
+				slog.DebugContext(ctx, fmt.Sprintf("moderate remaining stream chunks error: %s", err))
 				moderationFailedErr = fmt.Errorf("%w: %w", ErrOutputNotAllowed, err)
 			} else {
 				// Send remaining chunks if moderation passed

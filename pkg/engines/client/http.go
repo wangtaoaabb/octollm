@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"slices"
@@ -14,7 +15,6 @@ import (
 
 	"github.com/infinigence/octollm/pkg/errutils"
 	"github.com/infinigence/octollm/pkg/octollm"
-	"github.com/sirupsen/logrus"
 )
 
 type StreamingType string
@@ -140,7 +140,7 @@ func (e *HTTPEndpoint) Process(req *octollm.Request) (*octollm.Response, error) 
 	}
 
 	ct := resp.Header.Get("Content-Type")
-	logrus.WithContext(req.Context()).Debugf("[http-endpoint] got response with status code %d, content-type %s", resp.StatusCode, ct)
+	slog.DebugContext(req.Context(), fmt.Sprintf("[http-endpoint] got response with status code %d, content-type %s", resp.StatusCode, ct))
 
 	// Determine if response is streaming
 	isStream := false
@@ -156,7 +156,7 @@ func (e *HTTPEndpoint) Process(req *octollm.Request) (*octollm.Response, error) 
 	}
 	if !isStream {
 		// non-stream
-		logrus.WithContext(req.Context()).Debugf("[http-endpoint] returning non-stream response")
+		slog.DebugContext(req.Context(), "[http-endpoint] returning non-stream response")
 		body := octollm.NewBodyFromReader(resp.Body, nil)
 		body.SetParser(e.nonstreamParser(req))
 		llmresp := octollm.NewNonStreamResponse(resp.StatusCode, resp.Header, body)
@@ -185,7 +185,7 @@ func (e *HTTPEndpoint) Process(req *octollm.Request) (*octollm.Response, error) 
 		return nil, fmt.Errorf("unsupported streaming type %s", streamingType)
 	}
 
-	logrus.WithContext(req.Context()).Debugf("[http-endpoint] returning stream response")
+	slog.DebugContext(req.Context(), "[http-endpoint] returning stream response")
 	return llmresp, nil
 }
 
@@ -201,7 +201,7 @@ func (e *HTTPEndpoint) processSSEStream(ctx context.Context, resp *http.Response
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
 		if ctx.Err() != nil {
-			logrus.WithContext(ctx).Infof("[http-endpoint] context error during stream response: %v", ctx.Err())
+			slog.InfoContext(ctx, fmt.Sprintf("[http-endpoint] context error during stream response: %v", ctx.Err()))
 			return
 		}
 		line := scanner.Bytes()
@@ -219,9 +219,9 @@ func (e *HTTPEndpoint) processSSEStream(ctx context.Context, resp *http.Response
 			}
 			select {
 			case ch <- chunk:
-				logrus.WithContext(ctx).Debugf("[http-endpoint] pushed stream chunk: len=%d", bodyLen)
+				slog.DebugContext(ctx, fmt.Sprintf("[http-endpoint] pushed stream chunk: len=%d", bodyLen))
 			case <-ctx.Done():
-				logrus.WithContext(ctx).Infof("[http-endpoint] context error during stream response: %v", ctx.Err())
+				slog.InfoContext(ctx, fmt.Sprintf("[http-endpoint] context error during stream response: %v", ctx.Err()))
 				return
 			}
 			continue
@@ -256,11 +256,11 @@ func (e *HTTPEndpoint) processSSEStream(ctx context.Context, resp *http.Response
 			metaBuffer[key] = value
 		default:
 			// ignore other fields
-			logrus.WithContext(ctx).Debugf("[http-endpoint] ignore event line because of unknown key %s", key)
+			slog.DebugContext(ctx, fmt.Sprintf("[http-endpoint] ignore event line because of unknown key %s", key))
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		logrus.WithContext(ctx).Warnf("[http-endpoint] scan response body error: %v", err)
+		slog.WarnContext(ctx, fmt.Sprintf("[http-endpoint] scan response body error: %v", err))
 	}
 }
 
@@ -273,12 +273,12 @@ func (e *HTTPEndpoint) processJSONStream(ctx context.Context, resp *http.Respons
 	// Read opening bracket '['
 	t, err := dec.Token()
 	if err != nil {
-		logrus.WithContext(ctx).Warnf("[http-endpoint] failed to read opening bracket: %v", err)
+		slog.WarnContext(ctx, fmt.Sprintf("[http-endpoint] failed to read opening bracket: %v", err))
 		return
 	}
 	// Verify it's an array opening bracket
 	if delim, ok := t.(json.Delim); !ok || delim != '[' {
-		logrus.WithContext(ctx).Warnf("[http-endpoint] expected array opening bracket, got %T: %v", t, t)
+		slog.WarnContext(ctx, fmt.Sprintf("[http-endpoint] expected array opening bracket, got %T: %v", t, t))
 		return
 	}
 
@@ -287,13 +287,13 @@ func (e *HTTPEndpoint) processJSONStream(ctx context.Context, resp *http.Respons
 	// Read array elements
 	for dec.More() {
 		if ctx.Err() != nil {
-			logrus.WithContext(ctx).Infof("[http-endpoint] context error during JSON stream response: %v", ctx.Err())
+			slog.InfoContext(ctx, fmt.Sprintf("[http-endpoint] context error during JSON stream response: %v", ctx.Err()))
 			return
 		}
 		// Decode one JSON object into RawMessage to preserve the raw bytes
 		var rawMsg json.RawMessage
 		if err := dec.Decode(&rawMsg); err != nil {
-			logrus.WithContext(ctx).Warnf("[http-endpoint] failed to decode JSON object: %v", err)
+			slog.WarnContext(ctx, fmt.Sprintf("[http-endpoint] failed to decode JSON object: %v", err))
 			return
 		}
 
@@ -308,9 +308,9 @@ func (e *HTTPEndpoint) processJSONStream(ctx context.Context, resp *http.Respons
 
 		select {
 		case ch <- chunk:
-			logrus.WithContext(ctx).Debugf("[http-endpoint] pushed JSON stream chunk: len=%d", len(rawMsg))
+			slog.DebugContext(ctx, fmt.Sprintf("[http-endpoint] pushed JSON stream chunk: len=%d", len(rawMsg)))
 		case <-ctx.Done():
-			logrus.WithContext(ctx).Infof("[http-endpoint] context error during JSON stream response: %v", ctx.Err())
+			slog.InfoContext(ctx, fmt.Sprintf("[http-endpoint] context error during JSON stream response: %v", ctx.Err()))
 			return
 		}
 	}
@@ -318,7 +318,7 @@ func (e *HTTPEndpoint) processJSONStream(ctx context.Context, resp *http.Respons
 	// Read closing bracket ']'
 	_, err = dec.Token()
 	if err != nil {
-		logrus.WithContext(ctx).Warnf("[http-endpoint] failed to read closing bracket: %v", err)
+		slog.WarnContext(ctx, fmt.Sprintf("[http-endpoint] failed to read closing bracket: %v", err))
 		return
 	}
 }

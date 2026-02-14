@@ -3,6 +3,7 @@ package client
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -12,7 +13,6 @@ import (
 	"github.com/infinigence/octollm/pkg/types/openai"
 	"github.com/infinigence/octollm/pkg/types/rerank"
 	"github.com/infinigence/octollm/pkg/types/vertex"
-	"github.com/sirupsen/logrus"
 )
 
 type GeneralEndpoint struct {
@@ -155,7 +155,7 @@ func buildVertexEndpoint(endpoint string, req *octollm.Request) (string, error) 
 	}
 
 	endpoint = strings.ReplaceAll(endpoint, "{modelNameWithAction}", modelNameWithAction)
-	logrus.WithContext(req.Context()).Debugf("[buildVertexEndpoint] endpoint: %s", endpoint)
+	slog.DebugContext(req.Context(), fmt.Sprintf("[buildVertexEndpoint] endpoint: %s", endpoint))
 
 	return endpoint, nil
 }

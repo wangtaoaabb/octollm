@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -12,7 +13,6 @@ import (
 	green20220302 "github.com/alibabacloud-go/green-20220302/v2/client"
 	aliUtil "github.com/alibabacloud-go/tea-utils/v2/service"
 	"github.com/alibabacloud-go/tea/tea"
-	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -164,7 +164,7 @@ func (s *AliModeratorService) Allow(ctx context.Context, text []rune) error {
 		"content": textStr,
 	})
 	if err != nil {
-		logrus.WithContext(ctx).Errorf("[AliModeratorService.Allow] failed to marshal service parameters: %v", err)
+		slog.ErrorContext(ctx, fmt.Sprintf("[AliModeratorService.Allow] failed to marshal service parameters: %v", err))
 		result, status = ModerationResultNil, ModerationRequestFailed
 		return fmt.Errorf("failed to marshal service parameters: %w", err)
 	}
@@ -178,14 +178,14 @@ func (s *AliModeratorService) Allow(ctx context.Context, text []rune) error {
 	// Call Alibaba Cloud API
 	apiResult, err := s.client.TextModerationPlusWithOptions(&request, s.runtime)
 	if err != nil {
-		logrus.WithContext(ctx).Errorf("[AliModeratorService.Allow] TextModerationPlusWithOptions error: %v", err)
+		slog.ErrorContext(ctx, fmt.Sprintf("[AliModeratorService.Allow] TextModerationPlusWithOptions error: %v", err))
 		result, status = ModerationResultNil, ModerationRequestFailed
 		return fmt.Errorf("aliyun moderation API call failed: %w", err)
 	}
 
 	// Check HTTP status code
 	if *apiResult.StatusCode != http.StatusOK {
-		logrus.WithContext(ctx).Warnf("[AliModeratorService.Allow] aliyun API returned error status: %d", *apiResult.StatusCode)
+		slog.WarnContext(ctx, fmt.Sprintf("[AliModeratorService.Allow] aliyun API returned error status: %d", *apiResult.StatusCode))
 		result, status = ModerationResultNil, ModerationRequestFailed
 		return fmt.Errorf("aliyun API returned error status: %d", *apiResult.StatusCode)
 	}
@@ -193,7 +193,7 @@ func (s *AliModeratorService) Allow(ctx context.Context, text []rune) error {
 	// Check business status code
 	body := apiResult.Body
 	if *body.Code != http.StatusOK {
-		logrus.WithContext(ctx).Warnf("[AliModeratorService.Allow] aliyun API returned error code: %d", *body.Code)
+		slog.WarnContext(ctx, fmt.Sprintf("[AliModeratorService.Allow] aliyun API returned error code: %d", *body.Code))
 		result, status = ModerationResultNil, ModerationRequestFailed
 		return fmt.Errorf("aliyun API returned error code: %d", *body.Code)
 	}
@@ -211,21 +211,21 @@ func (s *AliModeratorService) Allow(ctx context.Context, text []rune) error {
 		// Get threshold configuration
 		threshold, ok := s.thresholds[label]
 		if !ok {
-			logrus.WithContext(ctx).Warnf("[AliModeratorService.Allow] label %s not configured in thresholds, skipping", label)
+			slog.WarnContext(ctx, fmt.Sprintf("[AliModeratorService.Allow] label %s not configured in thresholds, skipping", label))
 			continue
 		}
 
 		// Check if threshold is exceeded
 		confidence := *info.Confidence
 		if confidence > threshold.Value {
-			logrus.WithContext(ctx).Infof("[AliModeratorService.Allow] content blocked, label: %s, confidence: %.2f, threshold: %.2f",
-				label, confidence, threshold.Value)
+			slog.InfoContext(ctx, fmt.Sprintf("[AliModeratorService.Allow] content blocked, label: %s, confidence: %.2f, threshold: %.2f",
+				label, confidence, threshold.Value))
 			result, status = ModerationResultBlocked, ModerationRequestSuccess
 			return fmt.Errorf("content blocked by Ali moderator: %s (confidence: %.2f)", label, confidence)
 		}
 	}
 
-	logrus.WithContext(ctx).Debugf("[AliModeratorService.Allow] content passed moderation")
+	slog.DebugContext(ctx, fmt.Sprintf("[AliModeratorService.Allow] content passed moderation"))
 	result, status = ModerationResultAllowed, ModerationRequestSuccess
 	return nil
 }

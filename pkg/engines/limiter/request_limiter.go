@@ -3,12 +3,12 @@ package limiter
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/infinigence/octollm/pkg/errutils"
 	"github.com/infinigence/octollm/pkg/octollm"
 	"github.com/redis/go-redis/v9"
-	"github.com/sirupsen/logrus"
 )
 
 // RequestLimiterEngine is a token bucket-based request rate limiter
@@ -88,13 +88,13 @@ func (e *RequestLimiterEngine) allow(ctx context.Context) (done func(), err erro
 	result, err := e.tokenBucketScript.Run(ctx, e.redisClient, []string{e.key},
 		e.burst, e.rate, nowUnix, windowSeconds).Result()
 	if err != nil {
-		logrus.WithContext(ctx).Errorf("[RequestLimiterEngine] token bucket script error: %v, key: %s", err, e.key)
+		slog.ErrorContext(ctx, fmt.Sprintf("[RequestLimiterEngine] token bucket script error: %v, key: %s", err, e.key))
 		return func() {}, fmt.Errorf("token bucket script error: %w", err)
 	}
 
 	results, ok := result.([]interface{})
 	if !ok || len(results) != 2 {
-		logrus.WithContext(ctx).Errorf("[RequestLimiterEngine] unexpected script result format, key: %s", e.key)
+		slog.ErrorContext(ctx, fmt.Sprintf("[RequestLimiterEngine] unexpected script result format, key: %s", e.key))
 		return func() {}, fmt.Errorf("unexpected script result format")
 	}
 
@@ -102,11 +102,11 @@ func (e *RequestLimiterEngine) allow(ctx context.Context) (done func(), err erro
 	tokens, _ := results[1].(int64)
 
 	if allowed == 0 {
-		logrus.WithContext(ctx).Warnf("[RequestLimiterEngine] request limit reached, key: %s, tokens: %d, burst: %d", e.key, tokens, e.burst)
+		slog.WarnContext(ctx, fmt.Sprintf("[RequestLimiterEngine] request limit reached, key: %s, tokens: %d, burst: %d", e.key, tokens, e.burst))
 		return func() {}, errRequestLimitReached
 	}
 
-	logrus.WithContext(ctx).Debugf("[RequestLimiterEngine] request allowed, key: %s, tokens: %d/%d", e.key, tokens, e.burst)
+	slog.DebugContext(ctx, fmt.Sprintf("[RequestLimiterEngine] request allowed, key: %s, tokens: %d/%d", e.key, tokens, e.burst))
 
 	// done function doesn't need to do anything, as tokens are already deducted in Lua script
 	done = func() {}
@@ -121,13 +121,13 @@ func (e *RequestLimiterEngine) Process(req *octollm.Request) (*octollm.Response,
 	done, err := e.allow(ctx)
 	if err != nil {
 		if err == errRequestLimitReached {
-			logrus.WithContext(ctx).Warnf("[RequestLimiterEngine] request limit reached, key: %s", e.key)
+			slog.WarnContext(ctx, fmt.Sprintf("[RequestLimiterEngine] request limit reached, key: %s", e.key))
 			return nil, &errutils.UpstreamRespError{
 				StatusCode: 429,
 				Body:       []byte("request limit reached"),
 			}
 		}
-		logrus.WithContext(ctx).Errorf("[RequestLimiterEngine] request limiter error: %v, key: %s", err, e.key)
+		slog.ErrorContext(ctx, fmt.Sprintf("[RequestLimiterEngine] request limiter error: %v, key: %s", err, e.key))
 		return nil, &errutils.UpstreamRespError{
 			StatusCode: 500,
 			Body:       []byte("internal server error"),

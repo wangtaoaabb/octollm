@@ -1,18 +1,17 @@
 package main
 
 import (
-	"log"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/infinigence/octollm/pkg/engines/mock"
 	"github.com/infinigence/octollm/pkg/octollm"
-	"github.com/sirupsen/logrus"
 )
 
 func main() {
-
-	logrus.SetLevel(logrus.DebugLevel)
+	slog.SetLogLoggerLevel(slog.LevelDebug)
 
 	engine := mock.NewWithFixedOutput(`
 归档
@@ -50,6 +49,7 @@ func main() {
 	mux.Handle("/v1/completions", octollm.CompletionsHandler(engine))
 	mux.Handle("/v1/messages", octollm.MessagesHandler(engine))
 
-	log.Println("listening :8090")
-	log.Fatal(http.ListenAndServe(":8090", mux))
+	slog.Info("listening :8090")
+	err := http.ListenAndServe(":8090", mux)
+	slog.Error(fmt.Sprintf("server exited with error: %v", err))
 }

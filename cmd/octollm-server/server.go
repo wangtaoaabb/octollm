@@ -1,12 +1,14 @@
 package main
 
 import (
+	"fmt"
+	"log/slog"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/infinigence/octollm/pkg/composer"
 	"github.com/infinigence/octollm/pkg/octollm"
-	"github.com/sirupsen/logrus"
 )
 
 type Server struct {
@@ -19,12 +21,14 @@ func NewServer(conf *composer.ConfigFile) *Server {
 	modelRepo := composer.NewModelRepoFileBased()
 	err := modelRepo.UpdateFromConfig(conf)
 	if err != nil {
-		logrus.WithError(err).Fatal("failed to update model repo from config")
+		slog.Error(fmt.Sprintf("failed to update model repo from config: %v", err))
+		os.Exit(1)
 	}
 	ruleComposer := composer.NewRuleRepoFileBased(modelRepo, 10*time.Second, 10)
 	err = ruleComposer.UpdateFromConfig(conf)
 	if err != nil {
-		logrus.WithError(err).Fatal("failed to update rule composer from config")
+		slog.Error(fmt.Sprintf("failed to update rule composer from config: %v", err))
+		os.Exit(1)
 	}
 	return &Server{
 		conf:         conf,

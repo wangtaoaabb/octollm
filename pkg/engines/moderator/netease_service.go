@@ -3,11 +3,11 @@ package moderator
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	v5 "github.com/yidun/yidun-golang-sdk/yidun/service/antispam/text"
 	"github.com/yidun/yidun-golang-sdk/yidun/service/antispam/text/v5/check/sync/single"
 )
@@ -113,14 +113,14 @@ func (s *NeteaseModeratorService) Allow(ctx context.Context, text []rune) error 
 	// Call Netease moderation API
 	apiResult, err := s.client.SyncCheckText(request)
 	if err != nil {
-		logrus.WithContext(ctx).Errorf("[NeteaseModeratorService.Allow] SyncCheckText error: %v", err)
+		slog.ErrorContext(ctx, fmt.Sprintf("[NeteaseModeratorService.Allow] SyncCheckText error: %v", err))
 		result, status = ModerationResultNil, ModerationRequestFailed
 		return fmt.Errorf("netease moderation API call failed: %w", err)
 	}
 
 	// Check HTTP status code
 	if apiResult.Code != http.StatusOK {
-		logrus.WithContext(ctx).Warnf("[NeteaseModeratorService.Allow] netease API returned error code: %d, msg: %s", apiResult.Code, apiResult.Msg)
+		slog.WarnContext(ctx, fmt.Sprintf("[NeteaseModeratorService.Allow] netease API returned error code: %d, msg: %s", apiResult.Code, apiResult.Msg))
 		result, status = ModerationResultNil, ModerationRequestFailed
 		return fmt.Errorf("netease API returned error code: %d", apiResult.Code)
 	}
@@ -130,19 +130,19 @@ func (s *NeteaseModeratorService) Allow(ctx context.Context, text []rune) error 
 
 		// Block risky content
 		if suggestion == NeteaseSuggestionRisk {
-			logrus.WithContext(ctx).Infof("[NeteaseModeratorService.Allow] content blocked by Netease moderator, suggestion: %d", suggestion)
+			slog.InfoContext(ctx, fmt.Sprintf("[NeteaseModeratorService.Allow] content blocked by Netease moderator, suggestion: %d", suggestion))
 			result, status = ModerationResultBlocked, ModerationRequestSuccess
 			return fmt.Errorf("content blocked by Netease moderator: risk content detected")
 		}
 
 		// Allow content to pass in other cases
-		logrus.WithContext(ctx).Debugf("[NeteaseModeratorService.Allow] content passed moderation, suggestion: %d", suggestion)
+		slog.DebugContext(ctx, fmt.Sprintf("[NeteaseModeratorService.Allow] content passed moderation, suggestion: %d", suggestion))
 		result, status = ModerationResultAllowed, ModerationRequestSuccess
 		return nil
 	}
 
 	// Log warning but allow content if no moderation result
-	logrus.WithContext(ctx).Warnf("[NeteaseModeratorService.Allow] no moderation result from Netease API")
+	slog.WarnContext(ctx, fmt.Sprintf("[NeteaseModeratorService.Allow] no moderation result from Netease API"))
 	result, status = ModerationResultAllowed, ModerationRequestSuccess
 	return nil
 }

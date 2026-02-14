@@ -3,10 +3,9 @@ package moderator
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"sync"
-
-	"github.com/sirupsen/logrus"
 )
 
 type WeightedModeratorItem struct {
@@ -110,7 +109,7 @@ func (s *WeightedModeratorService) getNextService() (string, TextModeratorServic
 	}
 
 	selectedBackend.currentWeight -= totalWeight
-	logrus.Debugf("[WeightedModeratorService] selected service: %s", selectedBackend.name)
+	slog.Debug(fmt.Sprintf("[WeightedModeratorService] selected service: %s", selectedBackend.name))
 
 	return selectedBackend.name, selectedBackend.service
 }

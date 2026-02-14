@@ -3,12 +3,12 @@ package mock
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/infinigence/octollm/pkg/octollm"
 	"github.com/infinigence/octollm/pkg/types/openai"
-	"github.com/sirupsen/logrus"
 )
 
 type MockEndpoint struct {
@@ -113,7 +113,7 @@ func (e *MockEndpoint) openAIStreamResponse(req *octollm.Request, v *openai.Chat
 				Body: octollm.NewBodyFromParsed(bodyVal, &octollm.JSONParser[openai.ChatCompletionStreamChunk]{}),
 			}:
 			case <-ctx.Done():
-				logrus.WithContext(ctx).Infof("[http-endpoint] context canceled during stream response: %v", ctx.Err())
+				slog.InfoContext(ctx, fmt.Sprintf("[http-endpoint] context canceled during stream response: %v", ctx.Err()))
 				return
 			}
 			time.Sleep(e.TPOT)
@@ -140,7 +140,7 @@ func (e *MockEndpoint) openAIStreamResponse(req *octollm.Request, v *openai.Chat
 			Body: octollm.NewBodyFromParsed(bodyVal, &octollm.JSONParser[openai.ChatCompletionStreamChunk]{}),
 		}:
 		case <-ctx.Done():
-			logrus.WithContext(ctx).Infof("[http-endpoint] context canceled during stream response: %v", ctx.Err())
+			slog.InfoContext(ctx, fmt.Sprintf("[http-endpoint] context canceled during stream response: %v", ctx.Err()))
 			return
 		}
 
@@ -149,7 +149,7 @@ func (e *MockEndpoint) openAIStreamResponse(req *octollm.Request, v *openai.Chat
 			Body: octollm.NewBodyFromBytes([]byte("[DONE]"), &octollm.JSONParser[openai.ChatCompletionStreamChunk]{}),
 		}:
 		case <-ctx.Done():
-			logrus.WithContext(ctx).Infof("[http-endpoint] context canceled during stream response: %v", ctx.Err())
+			slog.InfoContext(ctx, fmt.Sprintf("[http-endpoint] context canceled during stream response: %v", ctx.Err()))
 			return
 		}
 	}()

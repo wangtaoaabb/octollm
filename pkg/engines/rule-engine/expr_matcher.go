@@ -3,11 +3,11 @@ package ruleengine
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
 	"github.com/infinigence/octollm/pkg/octollm"
-	"github.com/sirupsen/logrus"
 )
 
 type FeatureExtractor interface {
@@ -38,20 +38,20 @@ var _ Matcher = (*ExprMatcher)(nil)
 func (m *ExprMatcher) Match(req *octollm.Request) bool {
 	env, err := m.buildEnvFor(req)
 	if err != nil {
-		logrus.WithContext(req.Context()).Warnf("build env for request failed: %v", err)
+		slog.WarnContext(req.Context(), fmt.Sprintf("build env for request failed: %v", err))
 	}
 
 	if m.prog == nil {
 		m.prog, err = expr.Compile(m.Code)
 		if err != nil {
-			logrus.WithContext(req.Context()).Warnf("compile expr code failed: %v", err)
+			slog.WarnContext(req.Context(), fmt.Sprintf("compile expr code failed: %v", err))
 			return false
 		}
 	}
 
 	output, err := expr.Run(m.prog, env)
 	if err != nil {
-		logrus.WithContext(req.Context()).Warnf("run expr program failed: %v", err)
+		slog.WarnContext(req.Context(), fmt.Sprintf("run expr program failed: %v", err))
 		return false
 	}
 
@@ -63,7 +63,7 @@ func (m *ExprMatcher) Match(req *octollm.Request) bool {
 	case float64:
 		return v != 0
 	default:
-		logrus.WithContext(req.Context()).Warningf("Run rule (%s) invalid return type: %T", m.Code, v)
+		slog.WarnContext(req.Context(), fmt.Sprintf("Run rule (%s) invalid return type: %T", m.Code, v))
 		return false
 	}
 }
@@ -88,7 +88,7 @@ func (m *ExprMatcher) buildEnvFor(req *octollm.Request) (*ExprMatcherEnv, error)
 		if err != nil {
 			return nil, fmt.Errorf("extract features failed: %w", err)
 		}
-		logrus.WithContext(req.Context()).Debugf("[expr-matcher] extracted features: %v", features)
+		slog.DebugContext(req.Context(), fmt.Sprintf("[expr-matcher] extracted features: %v", features))
 	}
 
 	env := &ExprMatcherEnv{

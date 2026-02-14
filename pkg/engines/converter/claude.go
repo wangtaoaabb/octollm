@@ -5,8 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-
-	"github.com/sirupsen/logrus"
+	"log/slog"
 
 	"github.com/infinigence/octollm/pkg/octollm"
 	"github.com/infinigence/octollm/pkg/types/anthropic"
@@ -24,7 +23,7 @@ func NewChatCompletionToClaudeMessages(next octollm.Engine) *ChatCompletionToCla
 }
 
 func (e *ChatCompletionToClaudeMessages) Process(req *octollm.Request) (*octollm.Response, error) {
-	logrus.WithContext(req.Context()).Infof("converting request body to ChatCompletions format from ClaudeMessages")
+	slog.InfoContext(req.Context(), "converting request body to ChatCompletions format from ClaudeMessages")
 	newBody, err := e.convertRequestBody(req.Context(), req.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert request body: %w", err)
@@ -442,7 +441,7 @@ func (e *ChatCompletionToClaudeMessages) convertStreamResponse(ctx context.Conte
 			parsed, err := chunk.Body.Parsed()
 			if err != nil {
 				if !errors.Is(err, octollm.ErrStreamDone) {
-					logrus.WithContext(ctx).Errorf("failed to parse stream chunk: %v", err)
+					slog.ErrorContext(ctx, fmt.Sprintf("failed to parse stream chunk: %v", err))
 					continue
 				}
 
@@ -455,7 +454,7 @@ func (e *ChatCompletionToClaudeMessages) convertStreamResponse(ctx context.Conte
 						Index: intPtr(currentBlockIndex),
 					}
 					if err := e.sendEvent(outCh, blockStop); err != nil {
-						logrus.WithContext(ctx).Errorf("failed to send content_block_stop event: %v", err)
+						slog.ErrorContext(ctx, fmt.Sprintf("failed to send content_block_stop event: %v", err))
 						break
 					}
 					currentBlockType = blockTypeNone
@@ -484,7 +483,7 @@ func (e *ChatCompletionToClaudeMessages) convertStreamResponse(ctx context.Conte
 						}
 					}
 					if err := e.sendEvent(outCh, msgDelta); err != nil {
-						logrus.WithContext(ctx).Errorf("failed to send message_delta event: %v", err)
+						slog.ErrorContext(ctx, fmt.Sprintf("failed to send message_delta event: %v", err))
 						break
 					}
 					pendingFinishReason = nil
@@ -495,14 +494,14 @@ func (e *ChatCompletionToClaudeMessages) convertStreamResponse(ctx context.Conte
 					Type: "message_stop",
 				}
 				if err := e.sendEvent(outCh, msgStop); err != nil {
-					logrus.WithContext(ctx).Errorf("failed to send message_stop event: %v", err)
+					slog.ErrorContext(ctx, fmt.Sprintf("failed to send message_stop event: %v", err))
 				}
 				break
 			}
 
 			openaiChunk, ok := parsed.(*openai.ChatCompletionStreamChunk)
 			if !ok {
-				logrus.WithContext(ctx).Errorf("parsed stream chunk is not *openai.ChatCompletionStreamResponse, got %T", parsed)
+				slog.ErrorContext(ctx, fmt.Sprintf("parsed stream chunk is not *openai.ChatCompletionStreamResponse, got %T", parsed))
 				continue
 			}
 
@@ -522,7 +521,7 @@ func (e *ChatCompletionToClaudeMessages) convertStreamResponse(ctx context.Conte
 					},
 				}
 				if err := e.sendEvent(outCh, msgStart); err != nil {
-					logrus.WithContext(ctx).Errorf("failed to send message_start event: %v", err)
+					slog.ErrorContext(ctx, fmt.Sprintf("failed to send message_start event: %v", err))
 					continue
 				}
 				started = true
@@ -575,7 +574,7 @@ func (e *ChatCompletionToClaudeMessages) convertStreamResponse(ctx context.Conte
 							Index: intPtr(currentBlockIndex),
 						}
 						if err := e.sendEvent(outCh, blockStop); err != nil {
-							logrus.WithContext(ctx).Errorf("failed to send content_block_stop event: %v", err)
+							slog.ErrorContext(ctx, fmt.Sprintf("failed to send content_block_stop event: %v", err))
 							continue
 						}
 					}
@@ -596,7 +595,7 @@ func (e *ChatCompletionToClaudeMessages) convertStreamResponse(ctx context.Conte
 						},
 					}
 					if err := e.sendEvent(outCh, blockStart); err != nil {
-						logrus.WithContext(ctx).Errorf("failed to send content_block_start event: %v", err)
+						slog.ErrorContext(ctx, fmt.Sprintf("failed to send content_block_start event: %v", err))
 						continue
 					}
 					currentBlockType = blockTypeThinking
@@ -615,7 +614,7 @@ func (e *ChatCompletionToClaudeMessages) convertStreamResponse(ctx context.Conte
 				deltaEvent.DeltaRaw = deltaBytes
 
 				if err := e.sendEvent(outCh, deltaEvent); err != nil {
-					logrus.WithContext(ctx).Errorf("failed to send content_block_delta event: %v", err)
+					slog.ErrorContext(ctx, fmt.Sprintf("failed to send content_block_delta event: %v", err))
 					continue
 				}
 			}
@@ -641,7 +640,7 @@ func (e *ChatCompletionToClaudeMessages) convertStreamResponse(ctx context.Conte
 							Index: intPtr(currentBlockIndex),
 						}
 						if err := e.sendEvent(outCh, blockStop); err != nil {
-							logrus.WithContext(ctx).Errorf("failed to send content_block_stop event: %v", err)
+							slog.ErrorContext(ctx, fmt.Sprintf("failed to send content_block_stop event: %v", err))
 							continue
 						}
 					}
@@ -660,7 +659,7 @@ func (e *ChatCompletionToClaudeMessages) convertStreamResponse(ctx context.Conte
 						},
 					}
 					if err := e.sendEvent(outCh, blockStart); err != nil {
-						logrus.WithContext(ctx).Errorf("failed to send content_block_start for text event: %v", err)
+						slog.ErrorContext(ctx, fmt.Sprintf("failed to send content_block_start for text event: %v", err))
 						continue
 					}
 					currentBlockType = blockTypeText
@@ -679,7 +678,7 @@ func (e *ChatCompletionToClaudeMessages) convertStreamResponse(ctx context.Conte
 				deltaEvent.DeltaRaw = deltaBytes
 
 				if err := e.sendEvent(outCh, deltaEvent); err != nil {
-					logrus.WithContext(ctx).Errorf("failed to send content_block_delta event: %v", err)
+					slog.ErrorContext(ctx, fmt.Sprintf("failed to send content_block_delta event: %v", err))
 					continue
 				}
 			}
@@ -708,7 +707,7 @@ func (e *ChatCompletionToClaudeMessages) convertStreamResponse(ctx context.Conte
 								Index: intPtr(currentBlockIndex),
 							}
 							if err := e.sendEvent(outCh, blockStop); err != nil {
-								logrus.WithContext(ctx).Errorf("failed to send content_block_stop event: %v", err)
+								slog.ErrorContext(ctx, fmt.Sprintf("failed to send content_block_stop event: %v", err))
 								continue
 							}
 						}
@@ -730,7 +729,7 @@ func (e *ChatCompletionToClaudeMessages) convertStreamResponse(ctx context.Conte
 							},
 						}
 						if err := e.sendEvent(outCh, blockStart); err != nil {
-							logrus.WithContext(ctx).Errorf("failed to send content_block_start for tool_use event: %v", err)
+							slog.ErrorContext(ctx, fmt.Sprintf("failed to send content_block_start for tool_use event: %v", err))
 							continue
 						}
 						currentBlockType = blockTypeTool
@@ -751,7 +750,7 @@ func (e *ChatCompletionToClaudeMessages) convertStreamResponse(ctx context.Conte
 						deltaEvent.DeltaRaw = deltaBytes
 
 						if err := e.sendEvent(outCh, deltaEvent); err != nil {
-							logrus.WithContext(ctx).Errorf("failed to send input_json_delta event: %v", err)
+							slog.ErrorContext(ctx, fmt.Sprintf("failed to send input_json_delta event: %v", err))
 							continue
 						}
 					}

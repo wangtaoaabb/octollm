@@ -3,26 +3,26 @@ package limiter
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/infinigence/octollm/pkg/errutils"
 	"github.com/infinigence/octollm/pkg/octollm"
 	"github.com/redis/go-redis/v9"
-	"github.com/sirupsen/logrus"
 )
 
 // RequestColorLimiterEngine is a multi-tier token bucket-based priority rate limiter.
 // Performs rate limiting checks based on priority marked by RequestColorMarkerEngine.
 type RequestColorLimiterEngine struct {
-	redisClient             *redis.Client
-	keyPrefix               string        // Redis key prefix for storing token bucket states
-	limits                  []int         // Request limits for each supported priority tier (must be strictly decreasing)
-	rates                   []float64     // Token refill rates for each priority tier (calculated from limits and window)
-	window                  time.Duration // Time window
-	nameSpace               string        // Namespace for priority context isolation
-	tokenBucketScript       *redis.Script
-	dualTokenBucketScript   *redis.Script
-	next                    octollm.Engine
+	redisClient           *redis.Client
+	keyPrefix             string        // Redis key prefix for storing token bucket states
+	limits                []int         // Request limits for each supported priority tier (must be strictly decreasing)
+	rates                 []float64     // Token refill rates for each priority tier (calculated from limits and window)
+	window                time.Duration // Time window
+	nameSpace             string        // Namespace for priority context isolation
+	tokenBucketScript     *redis.Script
+	dualTokenBucketScript *redis.Script
+	next                  octollm.Engine
 }
 
 var _ octollm.Engine = (*RequestColorLimiterEngine)(nil)
@@ -92,7 +92,7 @@ func NewRequestColorLimiterEngine(redisClient *redis.Client, keyPrefix string, l
 	// Validate and filter limits to ensure strictly decreasing order
 	filteredLimits, filtered := filterDecreasingRates(limits)
 	if filtered {
-		logrus.Warnf("request_color_limiter_limits must be strictly decreasing, filtered from %v to %v (removed %d non-decreasing values)", limits, filteredLimits, len(limits)-len(filteredLimits))
+		slog.Warn(fmt.Sprintf("request_color_limiter_limits must be strictly decreasing, filtered from %v to %v (removed %d non-decreasing values)", limits, filteredLimits, len(limits)-len(filteredLimits)))
 	}
 
 	if window <= 0 {
@@ -162,13 +162,13 @@ func (e *RequestColorLimiterEngine) allow(ctx context.Context) (done func(), err
 		result, err := e.tokenBucketScript.Run(ctx, e.redisClient, []string{key},
 			burst, rate, nowUnix, windowSeconds).Result()
 		if err != nil {
-			logrus.WithContext(ctx).Errorf("[RequestColorLimiterEngine] token bucket script error for tier 0: %v, key: %s", err, key)
+			slog.ErrorContext(ctx, fmt.Sprintf("[RequestColorLimiterEngine] token bucket script error for tier 0: %v, key: %s", err, key))
 			return func() {}, fmt.Errorf("token bucket script error: %w", err)
 		}
 
 		results, ok := result.([]interface{})
 		if !ok || len(results) != 2 {
-			logrus.WithContext(ctx).Errorf("[RequestColorLimiterEngine] unexpected script result format for tier 0, key: %s", key)
+			slog.ErrorContext(ctx, fmt.Sprintf("[RequestColorLimiterEngine] unexpected script result format for tier 0, key: %s", key))
 			return func() {}, fmt.Errorf("unexpected script result format")
 		}
 
@@ -176,9 +176,9 @@ func (e *RequestColorLimiterEngine) allow(ctx context.Context) (done func(), err
 		tokens, _ := results[1].(int64)
 
 		if allowed == 1 {
-			logrus.WithContext(ctx).Infof("[RequestColorLimiterEngine] max priority request allowed, consumed from tier 0, tokens: %d/%d", tokens, burst)
+			slog.InfoContext(ctx, fmt.Sprintf("[RequestColorLimiterEngine] max priority request allowed, consumed from tier 0, tokens: %d/%d", tokens, burst))
 		} else {
-			logrus.WithContext(ctx).Warnf("[RequestColorLimiterEngine] tier 0 rejected, tokens: %d/%d, key: %s", tokens, burst, key)
+			slog.WarnContext(ctx, fmt.Sprintf("[RequestColorLimiterEngine] tier 0 rejected, tokens: %d/%d, key: %s", tokens, burst, key))
 			return func() {}, errRequestRateLimitReached
 		}
 	} else {
@@ -198,13 +198,13 @@ func (e *RequestColorLimiterEngine) allow(ctx context.Context) (done func(), err
 		result, err := e.dualTokenBucketScript.Run(ctx, e.redisClient, []string{ownKey, tier0Key},
 			ownBurst, ownRate, tier0Burst, tier0Rate, nowUnix, windowSeconds, reservedTokens).Result()
 		if err != nil {
-			logrus.WithContext(ctx).Errorf("[RequestColorLimiterEngine] dual token bucket script error: %v, ownKey: %s, tier0Key: %s", err, ownKey, tier0Key)
+			slog.ErrorContext(ctx, fmt.Sprintf("[RequestColorLimiterEngine] dual token bucket script error: %v, ownKey: %s, tier0Key: %s", err, ownKey, tier0Key))
 			return func() {}, fmt.Errorf("token bucket script error: %w", err)
 		}
 
 		results, ok := result.([]interface{})
 		if !ok || len(results) != 3 {
-			logrus.WithContext(ctx).Errorf("[RequestColorLimiterEngine] unexpected script result format, ownKey: %s, tier0Key: %s", ownKey, tier0Key)
+			slog.ErrorContext(ctx, fmt.Sprintf("[RequestColorLimiterEngine] unexpected script result format, ownKey: %s, tier0Key: %s", ownKey, tier0Key))
 			return func() {}, fmt.Errorf("unexpected script result format")
 		}
 
@@ -213,11 +213,11 @@ func (e *RequestColorLimiterEngine) allow(ctx context.Context) (done func(), err
 		tier0Tokens, _ := results[2].(int64)
 
 		if allowed == 1 {
-			logrus.WithContext(ctx).Infof("[RequestColorLimiterEngine] request allowed with priority %d (tier %d), consumed from tier %d and tier 0, ownTokens: %d/%d, tier0Tokens: %d/%d (reserved: %d)",
-				priority, tierIdx, tierIdx, ownTokens, ownBurst, tier0Tokens, tier0Burst, reservedTokens)
+			slog.InfoContext(ctx, fmt.Sprintf("[RequestColorLimiterEngine] request allowed with priority %d (tier %d), consumed from tier %d and tier 0, ownTokens: %d/%d, tier0Tokens: %d/%d (reserved: %d)",
+				priority, tierIdx, tierIdx, ownTokens, ownBurst, tier0Tokens, tier0Burst, reservedTokens))
 		} else {
-			logrus.WithContext(ctx).Warnf("[RequestColorLimiterEngine] request rejected with priority %d (tier %d), ownTokens: %d/%d, tier0Tokens: %d/%d (reserved: %d)",
-				priority, tierIdx, ownTokens, ownBurst, tier0Tokens, tier0Burst, reservedTokens)
+			slog.WarnContext(ctx, fmt.Sprintf("[RequestColorLimiterEngine] request rejected with priority %d (tier %d), ownTokens: %d/%d, tier0Tokens: %d/%d (reserved: %d)",
+				priority, tierIdx, ownTokens, ownBurst, tier0Tokens, tier0Burst, reservedTokens))
 			return func() {}, errRequestRateLimitReached
 		}
 	}
@@ -234,13 +234,13 @@ func (e *RequestColorLimiterEngine) Process(req *octollm.Request) (*octollm.Resp
 	done, err := e.allow(ctx)
 	if err != nil {
 		if err == errRequestRateLimitReached {
-			logrus.WithContext(ctx).Warnf("[RequestColorLimiterEngine] request rate limit reached, keyPrefix: %s", e.keyPrefix)
+			slog.WarnContext(ctx, fmt.Sprintf("[RequestColorLimiterEngine] request rate limit reached, keyPrefix: %s", e.keyPrefix))
 			return nil, &errutils.UpstreamRespError{
 				StatusCode: 429,
 				Body:       []byte("request rate limit reached"),
 			}
 		}
-		logrus.WithContext(ctx).Errorf("[RequestColorLimiterEngine] request rate limiter error: %v, keyPrefix: %s", err, e.keyPrefix)
+		slog.ErrorContext(ctx, fmt.Sprintf("[RequestColorLimiterEngine] request rate limiter error: %v, keyPrefix: %s", err, e.keyPrefix))
 		return nil, &errutils.UpstreamRespError{
 			StatusCode: 500,
 			Body:       []byte("internal server error"),

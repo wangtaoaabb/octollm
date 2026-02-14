@@ -3,10 +3,10 @@ package repeat_detector
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/infinigence/octollm/pkg/engines/moderator"
-	"github.com/sirupsen/logrus"
 )
 
 type RepeatDetectorConfig struct {
@@ -89,16 +89,15 @@ func (s *RepeatDetectorService) logRepeatDetection(ctx context.Context, content,
 	traceID := extractTraceID(ctx)
 	svcName := extractBackendName(ctx)
 
-	logrus.WithContext(ctx).WithFields(logrus.Fields{
-		"model":          s.modelName,
-		"svc_name":       svcName,
-		"trace_id":       traceID,
-		"detection_time": detectionTime,
-		"content_length": len([]rune(content)),
-		"repeat_pattern": patternPreview,
-		"repeat_count":   repeatCount,
-		"pattern_length": len(pattern),
-	}).Warn("[RepeatDetector] Repeated pattern detected")
+	slog.WarnContext(ctx, "[RepeatDetector] Repeated pattern detected",
+		"model", s.modelName,
+		"svc_name", svcName,
+		"trace_id", traceID,
+		"detection_time", detectionTime,
+		"content_length", len([]rune(content)),
+		"repeat_pattern", patternPreview,
+		"repeat_count", repeatCount,
+		"pattern_length", len(pattern))
 
 	// record metrics to Grafana
 	moderator.RepeatDetectionCounter.WithLabelValues(svcName, s.modelName).Inc()

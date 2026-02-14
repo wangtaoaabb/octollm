@@ -2,6 +2,7 @@ package composer
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -9,7 +10,6 @@ import (
 
 	anthropicSDK "github.com/anthropics/anthropic-sdk-go"
 	openaiSDK "github.com/openai/openai-go/v3"
-	"github.com/sirupsen/logrus"
 
 	loadbalancer "github.com/infinigence/octollm/pkg/engines/load-balancer"
 	ruleengine "github.com/infinigence/octollm/pkg/engines/rule-engine"
@@ -70,7 +70,7 @@ func (r *RuleComposerFileBased) getEngine(orgName, modelName string) (octollm.En
 	hasOrgModelConf := false
 	if orgName != "" {
 		if orgConf, ok := conf.Users[orgName]; ok {
-			logrus.Debugf("conf.Users: %+v", conf.Users[orgName])
+			slog.Debug(fmt.Sprintf("conf.Users: %+v", conf.Users[orgName]))
 			if v, ok := orgConf.Models[modelName]; ok {
 				orgModelConf = v
 				hasOrgModelConf = true
@@ -108,7 +108,7 @@ func (r *RuleComposerFileBased) getEngine(orgName, modelName string) (octollm.En
 	var engine octollm.Engine
 	defaultEngine, err := r.buildDefaultEngine(modelName)
 	if err != nil {
-		logrus.Warnf("failed to build default engine: %v", err)
+		slog.Warn(fmt.Sprintf("failed to build default engine: %v", err))
 	}
 	if len(finalRules) == 0 {
 		if defaultEngine == nil {
@@ -147,7 +147,7 @@ func (r *RuleComposerFileBased) buildDefaultEngine(modelName string) (octollm.En
 		}
 		engine, err := r.modelRepo.GetEngine(modelName, backendName)
 		if err != nil {
-			logrus.Warnf("failed to get engine for backend %s: %v", backendName, err)
+			slog.Warn(fmt.Sprintf("failed to get engine for backend %s: %v", backendName, err))
 			continue
 		}
 
@@ -219,10 +219,10 @@ func (r *RuleComposerFileBased) buildRuleEngineRuleByConfig(ruleConf *RuleConfig
 	for backendName, weight := range ruleConf.ForwardWeights {
 		engine, err := r.modelRepo.GetEngine(modelName, backendName)
 		if err != nil {
-			logrus.Warnf("failed to get engine for backend %s: %v", backendName, err)
+			slog.Warn(fmt.Sprintf("failed to get engine for backend %s: %v", backendName, err))
 			continue
 		}
-		logrus.Infof("successfully get engine for backend %s: %v", backendName, engine)
+		slog.Info(fmt.Sprintf("successfully get engine for backend %s: %v", backendName, engine))
 		lbItems = append(lbItems, loadbalancer.BackendItem{
 			Name:   backendName,
 			Weight: weight,

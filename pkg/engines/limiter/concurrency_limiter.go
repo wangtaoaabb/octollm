@@ -3,13 +3,13 @@ package limiter
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/infinigence/octollm/pkg/errutils"
 	"github.com/infinigence/octollm/pkg/octollm"
 	"github.com/redis/go-redis/v9"
-	"github.com/sirupsen/logrus"
 )
 
 type ConcurrencyLimiterEngine struct {
@@ -85,13 +85,13 @@ func (e *ConcurrencyLimiterEngine) allow(ctx context.Context) (done func(), err 
 	result, err := e.acquireScript.Run(ctx, e.redisClient, []string{e.key},
 		e.concurrency, nowUnix, expireBefore, memberID).Result()
 	if err != nil {
-		logrus.WithContext(ctx).Errorf("acquire script error: %v, key: %s", err, e.key)
+		slog.ErrorContext(ctx, fmt.Sprintf("acquire script error: %v, key: %s", err, e.key))
 		return func() {}, fmt.Errorf("acquire script error: %w", err)
 	}
 
 	results, ok := result.([]interface{})
 	if !ok || len(results) != 2 {
-		logrus.WithContext(ctx).Errorf("unexpected script result format, key: %s", e.key)
+		slog.ErrorContext(ctx, fmt.Sprintf("unexpected script result format, key: %s", e.key))
 		return func() {}, fmt.Errorf("unexpected script result format")
 	}
 
@@ -99,7 +99,7 @@ func (e *ConcurrencyLimiterEngine) allow(ctx context.Context) (done func(), err 
 	currentCount, _ := results[1].(int64)
 
 	if acquiredInt == 0 {
-		logrus.WithContext(ctx).Warnf("concurrency limit %d reached, current: %d, key: %s", e.concurrency, currentCount, e.key)
+		slog.WarnContext(ctx, fmt.Sprintf("concurrency limit %d reached, current: %d, key: %s", e.concurrency, currentCount, e.key))
 		return func() {}, errConcurrencyLimitReached
 	}
 
@@ -118,12 +118,12 @@ func (e *ConcurrencyLimiterEngine) allow(ctx context.Context) (done func(), err 
 			c1 := context.WithoutCancel(ctx)
 			_, err := e.releaseScript.Run(c1, e.redisClient, []string{e.key}, memberID).Result()
 			if err != nil {
-				logrus.WithContext(ctx).Errorf("failed to release member from set: %v, key: %s", err, e.key)
+				slog.ErrorContext(ctx, fmt.Sprintf("failed to release member from set: %v, key: %s", err, e.key))
 			}
 		}
 	}
 
-	logrus.WithContext(ctx).Debugf("concurrency allow: count=%d/%d, key=%s", currentCount, e.concurrency, e.key)
+	slog.DebugContext(ctx, fmt.Sprintf("concurrency allow: count=%d/%d, key=%s", currentCount, e.concurrency, e.key))
 
 	return done, nil
 }
@@ -135,13 +135,13 @@ func (e *ConcurrencyLimiterEngine) Process(req *octollm.Request) (*octollm.Respo
 	done, err := e.allow(ctx)
 	if err != nil {
 		if err == errConcurrencyLimitReached {
-			logrus.WithContext(ctx).Warnf("concurrency limiter: limit reached, key: %s", e.key)
+			slog.WarnContext(ctx, fmt.Sprintf("concurrency limiter: limit reached, key: %s", e.key))
 			return nil, &errutils.UpstreamRespError{
 				StatusCode: 429,
 				Body:       []byte("concurrency limit reached"),
 			}
 		}
-		logrus.WithContext(ctx).Errorf("concurrency limiter error: %v, key: %s", err, e.key)
+		slog.ErrorContext(ctx, fmt.Sprintf("concurrency limiter error: %v, key: %s", err, e.key))
 		return nil, &errutils.UpstreamRespError{
 			StatusCode: 500,
 			Body:       []byte("internal server error"),
@@ -171,20 +171,20 @@ func (e *ConcurrencyLimiterEngine) renewMember(ctx context.Context, memberID str
 			nowUnix := time.Now().Unix()
 			result, err := e.renewScript.Run(ctx, e.redisClient, []string{e.key}, nowUnix, memberID).Result()
 			if err != nil {
-				logrus.WithContext(ctx).Errorf("failed to renew member: %v, key: %s, memberID: %s", err, e.key, memberID)
+				slog.ErrorContext(ctx, fmt.Sprintf("failed to renew member: %v, key: %s, memberID: %s", err, e.key, memberID))
 				continue
 			}
 			results, ok := result.([]interface{})
 			if !ok || len(results) != 1 {
-				logrus.WithContext(ctx).Errorf("unexpected renew script result format, key: %s, memberID: %s", e.key, memberID)
+				slog.ErrorContext(ctx, fmt.Sprintf("unexpected renew script result format, key: %s, memberID: %s", e.key, memberID))
 				continue
 			}
 			renewed, _ := results[0].(int64)
 			if renewed == 0 {
-				logrus.WithContext(ctx).Warnf("member not found for renewal, key: %s, memberID: %s", e.key, memberID)
+				slog.WarnContext(ctx, fmt.Sprintf("member not found for renewal, key: %s, memberID: %s", e.key, memberID))
 				return
 			}
-			logrus.WithContext(ctx).Debugf("renewed member: key=%s, memberID=%s", e.key, memberID)
+			slog.DebugContext(ctx, fmt.Sprintf("renewed member: key=%s, memberID=%s", e.key, memberID))
 		}
 	}
 }

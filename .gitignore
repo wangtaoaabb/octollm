@@ -6,9 +6,9 @@
 .cursor/
 
 # Build artifacts
-main
-octollm-server
-mock
+/main
+/octollm-server
+/mock
 
 # Config files
 config.yaml

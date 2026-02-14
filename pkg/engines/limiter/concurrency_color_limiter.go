@@ -3,13 +3,13 @@ package limiter
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/infinigence/octollm/pkg/errutils"
 	"github.com/infinigence/octollm/pkg/octollm"
 	"github.com/redis/go-redis/v9"
-	"github.com/sirupsen/logrus"
 )
 
 type ConcurrencyColorLimiterEngine struct {
@@ -78,7 +78,7 @@ func NewConcurrencyColorLimiterEngine(redisClient *redis.Client, key string, rat
 	}
 	filteredRates, filtered := filterDecreasingRates(rates)
 	if filtered {
-		logrus.Warnf("concurrency_rates must be strictly decreasing, filtered from %v to %v (removed %d non-decreasing values)", rates, filteredRates, len(rates)-len(filteredRates))
+		slog.Warn(fmt.Sprintf("concurrency_rates must be strictly decreasing, filtered from %v to %v (removed %d non-decreasing values)", rates, filteredRates, len(rates)-len(filteredRates)))
 	}
 
 	return &ConcurrencyColorLimiterEngine{
@@ -139,13 +139,13 @@ func (e *ConcurrencyColorLimiterEngine) allow(ctx context.Context) (done func(),
 		result, err := e.acquireSingleScript.Run(ctx, e.redisClient, []string{tier0Key},
 			tier0Limit, nowUnix, expireBefore, memberID).Result()
 		if err != nil {
-			logrus.WithContext(ctx).Errorf("acquire script error for tier 0: %v, key: %s", err, tier0Key)
+			slog.ErrorContext(ctx, fmt.Sprintf("acquire script error for tier 0: %v, key: %s", err, tier0Key))
 			return func() {}, fmt.Errorf("acquire script error: %w", err)
 		}
 
 		results, ok := result.([]interface{})
 		if !ok || len(results) != 2 {
-			logrus.WithContext(ctx).Errorf("unexpected script result format for tier 0, key: %s", tier0Key)
+			slog.ErrorContext(ctx, fmt.Sprintf("unexpected script result format for tier 0, key: %s", tier0Key))
 			return func() {}, fmt.Errorf("unexpected script result format")
 		}
 
@@ -153,7 +153,7 @@ func (e *ConcurrencyColorLimiterEngine) allow(ctx context.Context) (done func(),
 		tier0Count, _ := results[1].(int64)
 
 		if acquiredInt == 0 {
-			logrus.WithContext(ctx).Warnf("tier 0 concurrency limit %d reached, current: %d, key: %s", tier0Limit, tier0Count, tier0Key)
+			slog.WarnContext(ctx, fmt.Sprintf("tier 0 concurrency limit %d reached, current: %d, key: %s", tier0Limit, tier0Count, tier0Key))
 			return func() {}, errRateLimitReached
 		}
 
@@ -168,11 +168,11 @@ func (e *ConcurrencyColorLimiterEngine) allow(ctx context.Context) (done func(),
 			c1 := context.WithoutCancel(ctx)
 			_, err := e.releaseSingleScript.Run(c1, e.redisClient, []string{tier0Key}, memberID).Result()
 			if err != nil {
-				logrus.WithContext(ctx).Errorf("failed to release member: %v, key: %s", err, tier0Key)
+				slog.ErrorContext(ctx, fmt.Sprintf("failed to release member: %v, key: %s", err, tier0Key))
 			}
 		}
 
-		logrus.WithContext(ctx).Infof("max priority concurrency allowed, tier 0 count: %d/%d, key: %s", tier0Count, tier0Limit, tier0Key)
+		slog.InfoContext(ctx, fmt.Sprintf("max priority concurrency allowed, tier 0 count: %d/%d, key: %s", tier0Count, tier0Limit, tier0Key))
 		return done, nil
 	} else {
 		// Non-max priority: atomically check own tier and tier 0 with reservation
@@ -188,13 +188,13 @@ func (e *ConcurrencyColorLimiterEngine) allow(ctx context.Context) (done func(),
 		result, err := e.acquireDualScript.Run(ctx, e.redisClient, []string{ownKey, tier0Key},
 			ownLimit, tier0Limit, nowUnix, expireBefore, memberID, reservedSlots).Result()
 		if err != nil {
-			logrus.WithContext(ctx).Errorf("dual acquire script error: %v, ownKey: %s, tier0Key: %s", err, ownKey, tier0Key)
+			slog.ErrorContext(ctx, fmt.Sprintf("dual acquire script error: %v, ownKey: %s, tier0Key: %s", err, ownKey, tier0Key))
 			return func() {}, fmt.Errorf("acquire script error: %w", err)
 		}
 
 		results, ok := result.([]interface{})
 		if !ok || len(results) != 3 {
-			logrus.WithContext(ctx).Errorf("unexpected script result format, ownKey: %s, tier0Key: %s", ownKey, tier0Key)
+			slog.ErrorContext(ctx, fmt.Sprintf("unexpected script result format, ownKey: %s, tier0Key: %s", ownKey, tier0Key))
 			return func() {}, fmt.Errorf("unexpected script result format")
 		}
 
@@ -203,8 +203,8 @@ func (e *ConcurrencyColorLimiterEngine) allow(ctx context.Context) (done func(),
 		tier0Count, _ := results[2].(int64)
 
 		if acquiredInt == 0 {
-			logrus.WithContext(ctx).Warnf("concurrency limit reached for priority %d (tier %d), ownCount: %d/%d, tier0Count: %d/%d (reserved: %d)",
-				priority, tierIdx, ownCount, ownLimit, tier0Count, tier0Limit, reservedSlots)
+			slog.WarnContext(ctx, fmt.Sprintf("concurrency limit reached for priority %d (tier %d), ownCount: %d/%d, tier0Count: %d/%d (reserved: %d)",
+				priority, tierIdx, ownCount, ownLimit, tier0Count, tier0Limit, reservedSlots))
 			return func() {}, errRateLimitReached
 		}
 
@@ -219,12 +219,12 @@ func (e *ConcurrencyColorLimiterEngine) allow(ctx context.Context) (done func(),
 			c1 := context.WithoutCancel(ctx)
 			_, err := e.releaseDualScript.Run(c1, e.redisClient, []string{ownKey, tier0Key}, memberID).Result()
 			if err != nil {
-				logrus.WithContext(ctx).Errorf("failed to release member: %v, ownKey: %s, tier0Key: %s", err, ownKey, tier0Key)
+				slog.ErrorContext(ctx, fmt.Sprintf("failed to release member: %v, ownKey: %s, tier0Key: %s", err, ownKey, tier0Key))
 			}
 		}
 
-		logrus.WithContext(ctx).Infof("concurrency allowed for priority %d (tier %d), ownCount: %d/%d, tier0Count: %d/%d (reserved: %d)",
-			priority, tierIdx, ownCount, ownLimit, tier0Count, tier0Limit, reservedSlots)
+		slog.InfoContext(ctx, fmt.Sprintf("concurrency allowed for priority %d (tier %d), ownCount: %d/%d, tier0Count: %d/%d (reserved: %d)",
+			priority, tierIdx, ownCount, ownLimit, tier0Count, tier0Limit, reservedSlots))
 		return done, nil
 	}
 }
@@ -236,13 +236,13 @@ func (e *ConcurrencyColorLimiterEngine) Process(req *octollm.Request) (*octollm.
 	done, err := e.allow(ctx)
 	if err != nil {
 		if err == errRateLimitReached {
-			logrus.WithContext(ctx).Warnf("concurrency rate limiter: rate limit reached, key: %s", e.key)
+			slog.WarnContext(ctx, fmt.Sprintf("concurrency rate limiter: rate limit reached, key: %s", e.key))
 			return nil, &errutils.UpstreamRespError{
 				StatusCode: 429,
 				Body:       []byte("rate limit reached"),
 			}
 		}
-		logrus.WithContext(ctx).Errorf("concurrency rate limiter error: %v, key: %s", err, e.key)
+		slog.ErrorContext(ctx, fmt.Sprintf("concurrency rate limiter error: %v, key: %s", err, e.key))
 		return nil, &errutils.UpstreamRespError{
 			StatusCode: 500,
 			Body:       []byte("internal server error"),
@@ -429,20 +429,20 @@ func (e *ConcurrencyColorLimiterEngine) renewMemberSingle(ctx context.Context, k
 			nowUnix := time.Now().Unix()
 			result, err := e.renewSingleScript.Run(ctx, e.redisClient, []string{key}, nowUnix, memberID).Result()
 			if err != nil {
-				logrus.WithContext(ctx).Errorf("failed to renew member: %v, key: %s, memberID: %s", err, key, memberID)
+				slog.ErrorContext(ctx, fmt.Sprintf("failed to renew member: %v, key: %s, memberID: %s", err, key, memberID))
 				continue
 			}
 			results, ok := result.([]interface{})
 			if !ok || len(results) != 1 {
-				logrus.WithContext(ctx).Errorf("unexpected renew script result format, key: %s, memberID: %s", key, memberID)
+				slog.ErrorContext(ctx, fmt.Sprintf("unexpected renew script result format, key: %s, memberID: %s", key, memberID))
 				continue
 			}
 			renewed, _ := results[0].(int64)
 			if renewed == 0 {
-				logrus.WithContext(ctx).Warnf("member not found for renewal, key: %s, memberID: %s", key, memberID)
+				slog.WarnContext(ctx, fmt.Sprintf("member not found for renewal, key: %s, memberID: %s", key, memberID))
 				return
 			}
-			logrus.WithContext(ctx).Debugf("renewed member: key=%s, memberID=%s", key, memberID)
+			slog.DebugContext(ctx, fmt.Sprintf("renewed member: key=%s, memberID=%s", key, memberID))
 		}
 	}
 }
@@ -461,20 +461,20 @@ func (e *ConcurrencyColorLimiterEngine) renewMemberDual(ctx context.Context, own
 			nowUnix := time.Now().Unix()
 			result, err := e.renewDualScript.Run(ctx, e.redisClient, []string{ownKey, tier0Key}, nowUnix, memberID).Result()
 			if err != nil {
-				logrus.WithContext(ctx).Errorf("failed to renew member: %v, ownKey: %s, tier0Key: %s, memberID: %s", err, ownKey, tier0Key, memberID)
+				slog.ErrorContext(ctx, fmt.Sprintf("failed to renew member: %v, ownKey: %s, tier0Key: %s, memberID: %s", err, ownKey, tier0Key, memberID))
 				continue
 			}
 			results, ok := result.([]interface{})
 			if !ok || len(results) != 1 {
-				logrus.WithContext(ctx).Errorf("unexpected renew script result format, ownKey: %s, tier0Key: %s, memberID: %s", ownKey, tier0Key, memberID)
+				slog.ErrorContext(ctx, fmt.Sprintf("unexpected renew script result format, ownKey: %s, tier0Key: %s, memberID: %s", ownKey, tier0Key, memberID))
 				continue
 			}
 			renewed, _ := results[0].(int64)
 			if renewed == 0 {
-				logrus.WithContext(ctx).Warnf("member not found for renewal, ownKey: %s, tier0Key: %s, memberID: %s", ownKey, tier0Key, memberID)
+				slog.WarnContext(ctx, fmt.Sprintf("member not found for renewal, ownKey: %s, tier0Key: %s, memberID: %s", ownKey, tier0Key, memberID))
 				return
 			}
-			logrus.WithContext(ctx).Debugf("renewed member: ownKey=%s, tier0Key=%s, memberID=%s", ownKey, tier0Key, memberID)
+			slog.DebugContext(ctx, fmt.Sprintf("renewed member: ownKey=%s, tier0Key=%s, memberID=%s", ownKey, tier0Key, memberID))
 		}
 	}
 }

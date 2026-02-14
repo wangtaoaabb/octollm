@@ -3,13 +3,13 @@ package limiter
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/infinigence/octollm/pkg/errutils"
 	"github.com/infinigence/octollm/pkg/octollm"
 	"github.com/redis/go-redis/v9"
-	"github.com/sirupsen/logrus"
 )
 
 // Use unified priority context key
@@ -84,7 +84,7 @@ func NewConcurrencyColorMarkerEngine(redisClient *redis.Client, key string, rate
 
 	filteredRates, filtered := filterIncreasingRates(rates)
 	if filtered {
-		logrus.Warnf("rates must be strictly increasing, filtered from %v to %v (removed %d non-increasing values)", rates, filteredRates, len(rates)-len(filteredRates))
+		slog.Warn(fmt.Sprintf("rates must be strictly increasing, filtered from %v to %v (removed %d non-increasing values)", rates, filteredRates, len(rates)-len(filteredRates)))
 	}
 
 	return &ConcurrencyColorMarkerEngine{
@@ -129,20 +129,20 @@ func (e *ConcurrencyColorMarkerEngine) allow(ctx context.Context) (newCtx contex
 	// Call Lua script
 	result, err := e.acquireScript.Run(ctx, e.redisClient, keys, args...).Result()
 	if err != nil {
-		logrus.WithContext(ctx).Errorf("acquire script error: %v, key: %s", err, e.key)
+		slog.ErrorContext(ctx, fmt.Sprintf("acquire script error: %v, key: %s", err, e.key))
 		return ctx, func() {}, fmt.Errorf("acquire script error: %w", err)
 	}
 
 	results, ok := result.([]interface{})
 	if !ok || len(results) < 2 {
-		logrus.WithContext(ctx).Errorf("unexpected script result format, key: %s", e.key)
+		slog.ErrorContext(ctx, fmt.Sprintf("unexpected script result format, key: %s", e.key))
 		return ctx, func() {}, fmt.Errorf("unexpected script result format")
 	}
 
 	acquired, _ := results[0].(int64)
 	if acquired == 0 {
 		// All tiers exhausted
-		logrus.WithContext(ctx).Warnf("all tiers exhausted, key: %s", e.key)
+		slog.WarnContext(ctx, fmt.Sprintf("all tiers exhausted, key: %s", e.key))
 		return ctx, func() {}, errRateLimitReached
 	}
 
@@ -176,11 +176,11 @@ func (e *ConcurrencyColorMarkerEngine) allow(ctx context.Context) (newCtx contex
 		c1 := context.WithoutCancel(ctx)
 		_, err := e.releaseScript.Run(c1, e.redisClient, acquiredKeys, memberID).Result()
 		if err != nil {
-			logrus.WithContext(ctx).Errorf("failed to release member: %v, keys: %v", err, acquiredKeys)
+			slog.ErrorContext(ctx, fmt.Sprintf("failed to release member: %v, keys: %v", err, acquiredKeys))
 		}
 	}
 
-	logrus.WithContext(ctx).Infof("acquired priority %d from tier %d, acquiredKeys: %v", priority, acquiredTierIdx, acquiredKeys)
+	slog.InfoContext(ctx, fmt.Sprintf("acquired priority %d from tier %d, acquiredKeys: %v", priority, acquiredTierIdx, acquiredKeys))
 	return newCtx, done, nil
 }
 
@@ -191,13 +191,13 @@ func (e *ConcurrencyColorMarkerEngine) Process(req *octollm.Request) (*octollm.R
 	newCtx, done, err := e.allow(ctx)
 	if err != nil {
 		if err == errRateLimitReached {
-			logrus.WithContext(ctx).Warnf("concurrency marker: rate limit reached, key: %s", e.key)
+			slog.WarnContext(ctx, fmt.Sprintf("concurrency marker: rate limit reached, key: %s", e.key))
 			return nil, &errutils.UpstreamRespError{
 				StatusCode: 429,
 				Body:       []byte("rate limit reached"),
 			}
 		}
-		logrus.WithContext(ctx).Errorf("concurrency marker error: %v, key: %s", err, e.key)
+		slog.ErrorContext(ctx, fmt.Sprintf("concurrency marker error: %v, key: %s", err, e.key))
 		return nil, &errutils.UpstreamRespError{
 			StatusCode: 500,
 			Body:       []byte("internal server error"),
@@ -372,20 +372,20 @@ func (e *ConcurrencyColorMarkerEngine) renewMember(ctx context.Context, keys []s
 			nowUnix := time.Now().Unix()
 			result, err := e.renewScript.Run(ctx, e.redisClient, keys, nowUnix, memberID).Result()
 			if err != nil {
-				logrus.WithContext(ctx).Errorf("failed to renew member: %v, keys: %v, memberID: %s", err, keys, memberID)
+				slog.ErrorContext(ctx, fmt.Sprintf("failed to renew member: %v, keys: %v, memberID: %s", err, keys, memberID))
 				continue
 			}
 			results, ok := result.([]interface{})
 			if !ok || len(results) != 1 {
-				logrus.WithContext(ctx).Errorf("unexpected renew script result format, keys: %v, memberID: %s", keys, memberID)
+				slog.ErrorContext(ctx, fmt.Sprintf("unexpected renew script result format, keys: %v, memberID: %s", keys, memberID))
 				continue
 			}
 			renewed, _ := results[0].(int64)
 			if renewed == 0 {
-				logrus.WithContext(ctx).Warnf("member not found for renewal, keys: %v, memberID: %s", keys, memberID)
+				slog.WarnContext(ctx, fmt.Sprintf("member not found for renewal, keys: %v, memberID: %s", keys, memberID))
 				return
 			}
-			logrus.WithContext(ctx).Debugf("renewed member: keys=%v, memberID=%s", keys, memberID)
+			slog.DebugContext(ctx, fmt.Sprintf("renewed member: keys=%v, memberID=%s", keys, memberID))
 		}
 	}
 }

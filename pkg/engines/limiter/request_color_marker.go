@@ -3,12 +3,12 @@ package limiter
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/infinigence/octollm/pkg/errutils"
 	"github.com/infinigence/octollm/pkg/octollm"
 	"github.com/redis/go-redis/v9"
-	"github.com/sirupsen/logrus"
 )
 
 // RequestColorMarkerEngine is a multi-tier token bucket-based request rate limiter with priority marking.
@@ -81,7 +81,7 @@ func NewRequestColorMarkerEngine(redisClient *redis.Client, keyPrefix string, li
 	// Validate and filter limits to ensure strictly increasing order
 	filteredLimits, filtered := filterIncreasingRates(limits)
 	if filtered {
-		logrus.Warnf("request_color_marker_limits must be strictly increasing, filtered from %v to %v (removed %d non-increasing values)", limits, filteredLimits, len(limits)-len(filteredLimits))
+		slog.Warn(fmt.Sprintf("request_color_marker_limits must be strictly increasing, filtered from %v to %v (removed %d non-increasing values)", limits, filteredLimits, len(limits)-len(filteredLimits)))
 	}
 
 	if window <= 0 {
@@ -136,20 +136,20 @@ func (e *RequestColorMarkerEngine) allow(ctx context.Context) (newCtx context.Co
 	// Call Lua script
 	result, err := e.tokenBucketScript.Run(ctx, e.redisClient, keys, args...).Result()
 	if err != nil {
-		logrus.WithContext(ctx).Errorf("[RequestColorMarkerEngine] token bucket script error: %v, keyPrefix: %s", err, e.keyPrefix)
+		slog.ErrorContext(ctx, fmt.Sprintf("[RequestColorMarkerEngine] token bucket script error: %v, keyPrefix: %s", err, e.keyPrefix))
 		return ctx, func() {}, fmt.Errorf("token bucket script error: %w", err)
 	}
 
 	results, ok := result.([]interface{})
 	if !ok || len(results) < 2 {
-		logrus.WithContext(ctx).Errorf("[RequestColorMarkerEngine] unexpected script result format, keyPrefix: %s", e.keyPrefix)
+		slog.ErrorContext(ctx, fmt.Sprintf("[RequestColorMarkerEngine] unexpected script result format, keyPrefix: %s", e.keyPrefix))
 		return ctx, func() {}, fmt.Errorf("unexpected script result format")
 	}
 
 	acquired, _ := results[0].(int64)
 	if acquired == 0 {
 		// All tiers exhausted
-		logrus.WithContext(ctx).Warnf("[RequestColorMarkerEngine] all tiers exhausted, keyPrefix: %s", e.keyPrefix)
+		slog.WarnContext(ctx, fmt.Sprintf("[RequestColorMarkerEngine] all tiers exhausted, keyPrefix: %s", e.keyPrefix))
 		return ctx, func() {}, errRateLimitReached
 	}
 
@@ -160,7 +160,7 @@ func (e *RequestColorMarkerEngine) allow(ctx context.Context) (newCtx context.Co
 	// Set priority to context
 	newCtx = e.setPriorityToContext(ctx, priority)
 
-	logrus.WithContext(ctx).Infof("[RequestColorMarkerEngine] request allowed with priority %d (tier %d)", priority, acquiredTierIdx)
+	slog.InfoContext(ctx, fmt.Sprintf("[RequestColorMarkerEngine] request allowed with priority %d (tier %d)", priority, acquiredTierIdx))
 	done = func() {}
 	return newCtx, done, nil
 }
@@ -172,13 +172,13 @@ func (e *RequestColorMarkerEngine) Process(req *octollm.Request) (*octollm.Respo
 	newCtx, done, err := e.allow(ctx)
 	if err != nil {
 		if err == errRateLimitReached {
-			logrus.WithContext(ctx).Warnf("[RequestColorMarkerEngine] rate limit reached, keyPrefix: %s", e.keyPrefix)
+			slog.WarnContext(ctx, fmt.Sprintf("[RequestColorMarkerEngine] rate limit reached, keyPrefix: %s", e.keyPrefix))
 			return nil, &errutils.UpstreamRespError{
 				StatusCode: 429,
 				Body:       []byte("rate limit reached"),
 			}
 		}
-		logrus.WithContext(ctx).Errorf("[RequestColorMarkerEngine] marker error: %v, keyPrefix: %s", err, e.keyPrefix)
+		slog.ErrorContext(ctx, fmt.Sprintf("[RequestColorMarkerEngine] marker error: %v, keyPrefix: %s", err, e.keyPrefix))
 		return nil, &errutils.UpstreamRespError{
 			StatusCode: 500,
 			Body:       []byte("internal server error"),

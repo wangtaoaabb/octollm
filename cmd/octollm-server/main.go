@@ -2,35 +2,54 @@ package main
 
 import (
 	"flag"
-	"log"
+	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
 
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 	"github.com/infinigence/octollm/pkg/composer"
-	"github.com/sirupsen/logrus"
+	"github.com/mattn/go-isatty"
 
 	_ "net/http/pprof"
 )
 
 func main() {
 	var configFile string
+	var verbose bool
+	var jsonLog bool
 	flag.StringVar(&configFile, "c", "./config.yaml", "config file path")
+	flag.BoolVar(&verbose, "v", false, "enable verbose logging")
+	flag.BoolVar(&jsonLog, "json", false, "use JSON logging format")
 	flag.Parse()
 
-	logrus.SetLevel(logrus.DebugLevel)
+	level := slog.LevelInfo
+	if verbose {
+		level = slog.LevelDebug
+	}
+	var logHandler slog.Handler
+	if isatty.IsTerminal(os.Stdout.Fd()) && !jsonLog {
+		logHandler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level})
+	} else {
+		logHandler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level, AddSource: true})
+	}
+	slog.SetDefault(slog.New(logHandler))
+
 	r := gin.Default()
 
-	logrus.Infof("Using config file: %s", configFile)
+	slog.Info(fmt.Sprintf("Using config file: %s", configFile))
 	conf, err := composer.ReadConfigFile(configFile)
 	if err != nil {
-		logrus.WithError(err).Fatal("failed to read config file")
+		slog.Error(fmt.Sprintf("failed to read config file: %v", err), slog.String("config_file", configFile))
+		os.Exit(1)
 	}
 
 	// Start pprof server
 	if conf.PprofAddr != "" {
 		go func() {
-			log.Println(http.ListenAndServe(conf.PprofAddr, nil))
+			err := http.ListenAndServe(conf.PprofAddr, nil)
+			slog.Error(fmt.Sprintf("pprof server exited with error: %v", err))
 		}()
 	}
 
@@ -39,7 +58,8 @@ func main() {
 	auth := &BearerKeyMW{}
 	err = auth.UpdateFromConfig(conf)
 	if err != nil {
-		logrus.WithError(err).Fatal("failed to update auth from config")
+		slog.Error(fmt.Sprintf("failed to update auth from config: %v", err))
+		os.Exit(1)
 	}
 
 	// Register routes
@@ -57,6 +77,7 @@ func main() {
 	if conf.ListenAddr == "" {
 		conf.ListenAddr = ":8080"
 	}
-	log.Println("listening " + conf.ListenAddr)
-	log.Fatal(http.ListenAndServe(conf.ListenAddr, r))
+	slog.Info(fmt.Sprintf("listening %s", conf.ListenAddr))
+	err = http.ListenAndServe(conf.ListenAddr, r)
+	slog.Error(fmt.Sprintf("server exited with error: %v", err))
 }
