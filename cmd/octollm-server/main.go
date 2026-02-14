@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/gin-contrib/gzip"
+	ginslog "github.com/gin-contrib/slog"
 	"github.com/gin-gonic/gin"
 	"github.com/infinigence/octollm/pkg/composer"
 	"github.com/mattn/go-isatty"
@@ -36,7 +37,10 @@ func main() {
 	}
 	slog.SetDefault(slog.New(logHandler))
 
-	r := gin.Default()
+	r := gin.New()
+	r.Use(ginslog.SetLogger(ginslog.WithLogger(func(c *gin.Context, l *slog.Logger) *slog.Logger {
+		return slog.Default()
+	})), gin.Recovery())
 
 	slog.Info(fmt.Sprintf("Using config file: %s", configFile))
 	conf, err := composer.ReadConfigFile(configFile)
