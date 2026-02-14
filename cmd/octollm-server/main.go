@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/gin-contrib/gzip"
 	ginslog "github.com/gin-contrib/slog"
@@ -81,7 +85,43 @@ func main() {
 	if conf.ListenAddr == "" {
 		conf.ListenAddr = ":8080"
 	}
-	slog.Info(fmt.Sprintf("listening %s", conf.ListenAddr))
-	err = http.ListenAndServe(conf.ListenAddr, r)
-	slog.Error(fmt.Sprintf("server exited with error: %v", err))
+
+	srv := &http.Server{
+		Addr:    conf.ListenAddr,
+		Handler: r,
+	}
+
+	go func() {
+		slog.Info(fmt.Sprintf("listening %s", conf.ListenAddr))
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error(fmt.Sprintf("server exited with error: %v", err))
+			os.Exit(1)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	<-quit
+	slog.Info("shutting down server, press Ctrl+C again to force exit")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		<-quit
+		slog.Info("force exit requested")
+		cancel()
+	}()
+
+	select {
+	// Delay for 5 seconds to allow k8s endpoint to be updated
+	case <-time.After(5 * time.Second):
+		if err := srv.Shutdown(ctx); err != nil {
+			slog.Error(fmt.Sprintf("server shutdown error: %v", err))
+			os.Exit(1)
+		}
+		slog.Info("server exited gracefully")
+	case <-ctx.Done():
+	}
 }
