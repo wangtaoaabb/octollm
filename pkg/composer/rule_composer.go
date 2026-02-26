@@ -1,6 +1,7 @@
 package composer
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	loadbalancer "github.com/infinigence/octollm/pkg/engines/load-balancer"
 	ruleengine "github.com/infinigence/octollm/pkg/engines/rule-engine"
 	"github.com/infinigence/octollm/pkg/errutils"
+	"github.com/infinigence/octollm/pkg/exprenv"
 	"github.com/infinigence/octollm/pkg/octollm"
 	"github.com/infinigence/octollm/pkg/types/anthropic"
 	"github.com/infinigence/octollm/pkg/types/openai"
@@ -201,8 +203,7 @@ func (r *RuleComposerFileBased) buildRuleEngineRuleByConfig(ruleConf *RuleConfig
 		matcher = ruleengine.AlwaysTrueMatcher
 	} else {
 		matcher = &ruleengine.ExprMatcher{
-			Code:             ruleConf.MatchExpr,
-			FeatureExtractor: &ruleengine.SimpleFeatureExtractor{PrefixHashLen: []int{20}, SuffixHashLen: []int{20}},
+			Code: ruleConf.MatchExpr,
 		}
 	}
 
@@ -302,5 +303,15 @@ func (r *RuleComposerEngine) Process(req *octollm.Request) (*octollm.Response, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to get engine: %w", err)
 	}
+
+	// Inject expr env into context here, it could be reused by all matchers
+	env := exprenv.Get(req).
+		WithFeatureExtractor("promptTextLen", &ruleengine.PromptTextLenExtractor{}).
+		WithFeatureExtractor("prefix20", &ruleengine.PrefixHashExtractor{Length: 20}).
+		WithFeatureExtractor("suffix20", &ruleengine.SuffixHashExtractor{Length: 20})
+
+	ctx := context.WithValue(req.Context(), octollm.ContextKeyExprEnv, env)
+	req = req.WithContext(ctx)
+
 	return engine.Process(req)
 }
