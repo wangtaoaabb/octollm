@@ -105,3 +105,60 @@ func (e *SuffixHashExtractor) Features(req *octollm.Request) (any, error) {
 		return nil, fmt.Errorf("unsupported request body type %T", reqBody)
 	}
 }
+
+// messageTextForHash returns text from a message for hashing: Content.ExtractText(), or if empty
+// and the message has ToolCalls, the first tool call's Function.Arguments.
+func messageTextForHash(msg *openai.Message) string {
+	msgTxt := combinedTextForChatCompletionsMessage(msg)
+	if strings.TrimSpace(msgTxt) != "" {
+		return msgTxt
+	}
+	if len(msg.ToolCalls) == 0 {
+		return ""
+	}
+	toolcall := msg.ToolCalls[0]
+	if toolcall != nil && toolcall.Function != nil {
+		return toolcall.Function.Arguments
+	}
+	return ""
+}
+
+// Message5HashExtractor produces a composite hash of the first 5 messages: for each message
+// takes the first 100 bytes of text (from Content or first tool call's Arguments), feeds
+// them into FNV-32a cumulatively, and returns the hex hashes joined by "-" (e.g. "a1b2c3d4-e5f6a7b8-...").
+type Message5HashExtractor struct{}
+
+func (e *Message5HashExtractor) Features(req *octollm.Request) (any, error) {
+	reqBody, err := req.Body.Parsed()
+	if err != nil {
+		return nil, fmt.Errorf("parse request body failed: %w", err)
+	}
+
+	switch v := reqBody.(type) {
+	case *openai.ChatCompletionRequest:
+		if len(v.Messages) == 0 {
+			return "", nil
+		}
+		hasher := fnv.New32a()
+		hashes := make([]string, 0, 5)
+		for i := 0; i < len(v.Messages) && len(hashes) < 5; i++ {
+			msg := v.Messages[i]
+			if msg == nil {
+				continue
+			}
+			msgTxt := messageTextForHash(msg)
+			if msgTxt == "" {
+				continue
+			}
+			prefix := []byte(msgTxt)
+			if len(prefix) > 100 {
+				prefix = prefix[:100]
+			}
+			hasher.Write(prefix)
+			hashes = append(hashes, fmt.Sprintf("%08x", hasher.Sum32()))
+		}
+		return strings.Join(hashes, "-"), nil
+	default:
+		return nil, fmt.Errorf("unsupported request body type %T", reqBody)
+	}
+}

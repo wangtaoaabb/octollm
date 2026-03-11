@@ -82,6 +82,7 @@ func main() {
 	exprenv.RegisterDefaultExtractor("promptTextLen", &ruleengine.PromptTextLenExtractor{})
 	exprenv.RegisterDefaultExtractor("prefix20", &ruleengine.PrefixHashExtractor{Length: 20})
 	exprenv.RegisterDefaultExtractor("suffix20", &ruleengine.SuffixHashExtractor{Length: 20})
+	exprenv.RegisterDefaultExtractor("message5Hash", &ruleengine.Message5HashExtractor{})
 
 	s := NewServer(conf)
 

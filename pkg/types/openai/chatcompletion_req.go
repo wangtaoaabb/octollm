@@ -165,8 +165,20 @@ type MessageContentArray []*MessageContentItem
 func (m MessageContentArray) ExtractText() string {
 	text := ""
 	for _, item := range m {
-		if item.Type == "text" {
+		if item == nil {
+			continue
+		}
+		switch item.Type {
+		case "text":
 			text += item.Text
+		case "image_url":
+			if item.ImageURL != nil {
+				text += fmt.Sprintf("[img:%s]", item.ImageURL.GetImageUrl())
+			}
+		case "file":
+			if item.File != nil {
+				text += fmt.Sprintf("[file:%s]", item.File.FileURI)
+			}
 		}
 	}
 	return text
