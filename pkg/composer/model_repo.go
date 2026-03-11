@@ -2,6 +2,7 @@ package composer
 
 import (
 	"fmt"
+	"net/http"
 	"sync"
 
 	"github.com/infinigence/octollm/pkg/engines"
@@ -25,12 +26,31 @@ type ModelRepoFileBased struct {
 
 var _ ModelRepo = (*ModelRepoFileBased)(nil)
 
-func NewModelRepoFileBased() *ModelRepoFileBased {
-	return &ModelRepoFileBased{
+// ModelRepoOption defines configuration options for ModelRepoFileBased
+type ModelRepoOption func(*ModelRepoFileBased)
+
+// WithTransportWrapper configures an HTTP transport wrapper
+// Used to add additional functionality like OpenTelemetry tracing, retries, etc.
+func WithTransportWrapper(wrapper func(base http.RoundTripper) http.RoundTripper) ModelRepoOption {
+	return func(m *ModelRepoFileBased) {
+		m.cliManager = NewProxyClientManager(wrapper)
+	}
+}
+
+func NewModelRepoFileBased(opts ...ModelRepoOption) *ModelRepoFileBased {
+	m := &ModelRepoFileBased{
+		// Default: no transport wrapper (nil means no wrapping)
 		cliManager:         NewProxyClientManager(nil),
 		modelBackendConfig: make(map[string]map[string]*Backend),
 		modelBackendEngine: make(map[string]map[string]octollm.Engine),
 	}
+
+	// Apply all options
+	for _, opt := range opts {
+		opt(m)
+	}
+
+	return m
 }
 
 func (m *ModelRepoFileBased) UpdateFromConfig(conf *ConfigFile) error {
@@ -228,11 +248,14 @@ func (m *ModelRepoFileBased) BuildEngineByBackend(b *Backend) (octollm.Engine, e
 	}
 
 	llmGE := client.NewGeneralEndpoint(*generalConf)
-	llmEngine = llmGE
+	// Always use cliManager to get a client with transport wrapper for trace propagation
+	// GetClient("") returns the default client if no proxy is specified
+	var proxyURL string
 	if b.HTTPProxy != nil {
-		httpCli := m.cliManager.GetClient(*b.HTTPProxy)
-		llmEngine = llmGE.WithClient(httpCli)
+		proxyURL = *b.HTTPProxy
 	}
+	httpCli := m.cliManager.GetClient(proxyURL)
+	llmEngine = llmGE.WithClient(httpCli)
 
 	if b.PostRequestRewrites != nil {
 		llmEngine = engines.NewRewriteEngine(
