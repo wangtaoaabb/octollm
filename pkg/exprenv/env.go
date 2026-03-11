@@ -17,14 +17,28 @@ type exprEnv struct {
 // without requiring a live request.
 var Sentinel = &exprEnv{ReqEnv: &requestExprEnv{}}
 
-func Get(req *octollm.Request) *exprEnv {
-	env, ok := octollm.GetCtxValue[*exprEnv](req, octollm.ContextKeyExprEnv)
-	if ok {
-		return env
-	}
+var defaultExtractors = make(map[string]FeatureExtractor)
 
+// RegisterDefaultExtractor registers a feature extractor that will be included in every env
+// returned by Get(req). Call from init or main (e.g. in cmd/octollm-server/main.go or cmd/mock/main.go).
+// Must not be called concurrently with Get, UnregisterDefaultExtractor, or another RegisterDefaultExtractor.
+func RegisterDefaultExtractor(name string, extractor FeatureExtractor) {
+	defaultExtractors[name] = extractor
+}
+
+// UnregisterDefaultExtractor removes a previously registered default extractor. Useful in tests
+// to clean up after RegisterDefaultExtractor.
+// Must not be called concurrently with Get, RegisterDefaultExtractor, or another UnregisterDefaultExtractor.
+func UnregisterDefaultExtractor(name string) {
+	delete(defaultExtractors, name)
+}
+
+// Get returns an expr env for the request, built from the current req and globally
+// registered default extractors (see RegisterDefaultExtractor). No env is stored in context.
+// Must not be called concurrently with RegisterDefaultExtractor or UnregisterDefaultExtractor.
+func Get(req *octollm.Request) *exprEnv {
 	return &exprEnv{
-		ReqEnv: &requestExprEnv{req: req},
+		ReqEnv: &requestExprEnv{req: req, featureExtractors: defaultExtractors},
 	}
 }
 

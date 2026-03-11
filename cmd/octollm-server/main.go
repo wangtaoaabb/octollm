@@ -15,9 +15,10 @@ import (
 	ginslog "github.com/gin-contrib/slog"
 	"github.com/gin-gonic/gin"
 	"github.com/infinigence/octollm/pkg/composer"
+	ruleengine "github.com/infinigence/octollm/pkg/engines/rule-engine"
+	exprenv "github.com/infinigence/octollm/pkg/exprenv"
 	"github.com/mattn/go-isatty"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
-
 	_ "net/http/pprof"
 )
 
@@ -77,6 +78,10 @@ func main() {
 			slog.Error(fmt.Sprintf("pprof server exited with error: %v", err))
 		}()
 	}
+
+	exprenv.RegisterDefaultExtractor("promptTextLen", &ruleengine.PromptTextLenExtractor{})
+	exprenv.RegisterDefaultExtractor("prefix20", &ruleengine.PrefixHashExtractor{Length: 20})
+	exprenv.RegisterDefaultExtractor("suffix20", &ruleengine.SuffixHashExtractor{Length: 20})
 
 	s := NewServer(conf)
 

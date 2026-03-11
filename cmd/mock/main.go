@@ -7,11 +7,17 @@ import (
 	"time"
 
 	"github.com/infinigence/octollm/pkg/engines/mock"
+	ruleengine "github.com/infinigence/octollm/pkg/engines/rule-engine"
+	"github.com/infinigence/octollm/pkg/exprenv"
 	"github.com/infinigence/octollm/pkg/octollm"
 )
 
 func main() {
 	slog.SetLogLoggerLevel(slog.LevelDebug)
+
+	exprenv.RegisterDefaultExtractor("promptTextLen", &ruleengine.PromptTextLenExtractor{})
+	exprenv.RegisterDefaultExtractor("prefix20", &ruleengine.PrefixHashExtractor{Length: 20})
+	exprenv.RegisterDefaultExtractor("suffix20", &ruleengine.SuffixHashExtractor{Length: 20})
 
 	engine := mock.NewWithFixedOutput(`
 归档

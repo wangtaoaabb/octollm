@@ -73,17 +73,12 @@ func CreateTestRequest(opts ...reqOptFunc) *octollm.Request {
 	req := octollm.NewRequest(r, octollm.APIFormatChatCompletions)
 	req.Body.SetParser(parser)
 
-	// inject features into context
-	env := exprenv.Get(req)
+	// When custom features are set, register them so Get(req) will include them (no context storage).
 	if o.features != nil {
 		for name, extractor := range o.features {
-			env.WithFeatureExtractor(name, extractor)
+			exprenv.RegisterDefaultExtractor(name, extractor)
 		}
 	}
-	ctx := req.Context()
-	ctx = context.WithValue(ctx, octollm.ContextKeyExprEnv, env)
-	req = req.WithContext(ctx)
-
 	return req
 }
 
