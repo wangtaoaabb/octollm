@@ -343,13 +343,16 @@ func (e *ChatCompletionToClaudeMessages) convertNonStreamResponseBody(ctx contex
 
 	// Usage
 	if openaiResp.Usage != nil {
-		claudeResp.Usage = &anthropic.Usage{
-			InputTokens:  int64(openaiResp.Usage.PromptTokens),
-			OutputTokens: int64(openaiResp.Usage.CompletionTokens),
-		}
+		cached := int64(0)
 		// Handle cached tokens if available
 		if openaiResp.Usage.PromptTokensDetails != nil && openaiResp.Usage.PromptTokensDetails.CachedTokens > 0 {
-			cached := int64(openaiResp.Usage.PromptTokensDetails.CachedTokens)
+			cached = int64(openaiResp.Usage.PromptTokensDetails.CachedTokens)
+		}
+		claudeResp.Usage = &anthropic.Usage{
+			InputTokens:  int64(openaiResp.Usage.PromptTokens) - cached,
+			OutputTokens: int64(openaiResp.Usage.CompletionTokens),
+		}
+		if cached > 0 {
 			claudeResp.Usage.CacheReadInputTokens = &cached
 		}
 	}
@@ -479,12 +482,15 @@ func (e *ChatCompletionToClaudeMessages) convertStreamResponse(ctx context.Conte
 					msgDelta.DeltaRaw = deltaBytes
 
 					if pendingUsage != nil {
+						cached := int64(0)
+						if pendingUsage.PromptTokensDetails != nil && pendingUsage.PromptTokensDetails.CachedTokens > 0 {
+							cached = int64(pendingUsage.PromptTokensDetails.CachedTokens)
+						}
 						msgDelta.Usage = &anthropic.Usage{
-							InputTokens:  int64(pendingUsage.PromptTokens),
+							InputTokens:  int64(pendingUsage.PromptTokens) - cached,
 							OutputTokens: int64(pendingUsage.CompletionTokens),
 						}
-						if pendingUsage.PromptTokensDetails != nil && pendingUsage.PromptTokensDetails.CachedTokens > 0 {
-							cached := int64(pendingUsage.PromptTokensDetails.CachedTokens)
+						if cached > 0 {
 							msgDelta.Usage.CacheReadInputTokens = &cached
 						}
 					}

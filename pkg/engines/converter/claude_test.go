@@ -784,6 +784,53 @@ func TestChatCompletionsToClaudeMessages_convertNonStreamResponseBody_SimpleText
 	testChatCompletionsToClaudeMessages_convertNonStreamResponseBody(t, openaiRespJSON, expectedClaudeRespJSON)
 }
 
+func TestChatCompletionsToClaudeMessages_convertNonStreamResponseBody_WithCachedTokens(t *testing.T) {
+
+	openaiRespJSON := `{
+		"id": "chatcmpl-123",
+		"object": "chat.completion",
+		"created": 1677652288,
+		"model": "gpt-4",
+		"choices": [{
+			"index": 0,
+			"message": {
+				"role": "assistant",
+				"content": "I'm doing well, thank you!"
+			},
+			"finish_reason": "length"
+		}],
+		"usage": {
+			"prompt_tokens": 10,
+			"completion_tokens": 8,
+			"total_tokens": 18,
+			"prompt_tokens_details": {
+				"cached_tokens": 2
+			}
+		}
+	}`
+
+	expectedClaudeRespJSON := `{
+		"id": "chatcmpl-123",
+		"type": "message",
+		"role": "assistant",
+		"model": "gpt-4",
+		"content": [
+			{
+				"type": "text",
+				"text": "I'm doing well, thank you!"
+			}
+		],
+		"stop_reason": "max_tokens",
+		"usage": {
+			"input_tokens": 8,
+			"output_tokens": 8,
+			"cache_read_input_tokens": 2
+		}
+	}`
+
+	testChatCompletionsToClaudeMessages_convertNonStreamResponseBody(t, openaiRespJSON, expectedClaudeRespJSON)
+}
+
 func TestChatCompletionsToClaudeMessages_convertNonStreamResponseBody_ToolCallWithoutContent(t *testing.T) {
 	openaiRespJSON := `{
 		"id": "chatcmpl-abc123",
@@ -1071,6 +1118,53 @@ func TestChatCompletionsToClaudeMessages_convertStreamResponse_SimpleText(t *tes
 		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"."}}`,
 		`{"type":"content_block_stop","index":0}`,
 		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":31,"output_tokens":15}}`,
+		`{"type":"message_stop"}`,
+	}
+
+	testChatCompletionsToClaudeMessages_convertStreamResponse(t, openaiRespJSON, expectedClaudeRespJSON)
+}
+
+func TestChatCompletionsToClaudeMessages_convertStreamResponse_WithCachedTokens(t *testing.T) {
+	openaiRespJSON := []string{
+		`{"id":"c91dda37dc3c4018ac0fecf81cf0052d","object":"chat.completion.chunk","created":1765734075,"model":"Kimi-K2-Instruct","choices":[{"index":0,"delta":{"role":"assistant","content":"","tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}]}`,
+		`{"id":"c91dda37dc3c4018ac0fecf81cf0052d","object":"chat.completion.chunk","created":1765734075,"model":"Kimi-K2-Instruct","choices":[{"index":0,"delta":{"content":"I'm","tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}]}`,
+		`{"id":"c91dda37dc3c4018ac0fecf81cf0052d","object":"chat.completion.chunk","created":1765734075,"model":"Kimi-K2-Instruct","choices":[{"index":0,"delta":{"content":" Kim","tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}]}`,
+		`{"id":"c91dda37dc3c4018ac0fecf81cf0052d","object":"chat.completion.chunk","created":1765734075,"model":"Kimi-K2-Instruct","choices":[{"index":0,"delta":{"content":"i","tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}]}`,
+		`{"id":"c91dda37dc3c4018ac0fecf81cf0052d","object":"chat.completion.chunk","created":1765734075,"model":"Kimi-K2-Instruct","choices":[{"index":0,"delta":{"content":",","tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}]}`,
+		`{"id":"c91dda37dc3c4018ac0fecf81cf0052d","object":"chat.completion.chunk","created":1765734075,"model":"Kimi-K2-Instruct","choices":[{"index":0,"delta":{"content":" a","tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}]}`,
+		`{"id":"c91dda37dc3c4018ac0fecf81cf0052d","object":"chat.completion.chunk","created":1765734075,"model":"Kimi-K2-Instruct","choices":[{"index":0,"delta":{"content":" large","tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}]}`,
+		`{"id":"c91dda37dc3c4018ac0fecf81cf0052d","object":"chat.completion.chunk","created":1765734075,"model":"Kimi-K2-Instruct","choices":[{"index":0,"delta":{"content":" language","tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}]}`,
+		`{"id":"c91dda37dc3c4018ac0fecf81cf0052d","object":"chat.completion.chunk","created":1765734075,"model":"Kimi-K2-Instruct","choices":[{"index":0,"delta":{"content":" model","tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}]}`,
+		`{"id":"c91dda37dc3c4018ac0fecf81cf0052d","object":"chat.completion.chunk","created":1765734075,"model":"Kimi-K2-Instruct","choices":[{"index":0,"delta":{"content":" trained","tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}]}`,
+		`{"id":"c91dda37dc3c4018ac0fecf81cf0052d","object":"chat.completion.chunk","created":1765734075,"model":"Kimi-K2-Instruct","choices":[{"index":0,"delta":{"content":" by","tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}]}`,
+		`{"id":"c91dda37dc3c4018ac0fecf81cf0052d","object":"chat.completion.chunk","created":1765734075,"model":"Kimi-K2-Instruct","choices":[{"index":0,"delta":{"content":" Moon","tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}]}`,
+		`{"id":"c91dda37dc3c4018ac0fecf81cf0052d","object":"chat.completion.chunk","created":1765734075,"model":"Kimi-K2-Instruct","choices":[{"index":0,"delta":{"content":"shot","tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}]}`,
+		`{"id":"c91dda37dc3c4018ac0fecf81cf0052d","object":"chat.completion.chunk","created":1765734075,"model":"Kimi-K2-Instruct","choices":[{"index":0,"delta":{"content":" AI","tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}]}`,
+		`{"id":"c91dda37dc3c4018ac0fecf81cf0052d","object":"chat.completion.chunk","created":1765734075,"model":"Kimi-K2-Instruct","choices":[{"index":0,"delta":{"content":".","tool_calls":null},"logprobs":null,"finish_reason":null,"matched_stop":null}]}`,
+		`{"id":"c91dda37dc3c4018ac0fecf81cf0052d","object":"chat.completion.chunk","created":1765734075,"model":"Kimi-K2-Instruct","choices":[{"index":0,"delta":{"content":"","tool_calls":null},"logprobs":null,"finish_reason":"stop","matched_stop":163586}]}`,
+		`{"id":"c91dda37dc3c4018ac0fecf81cf0052d","object":"chat.completion.chunk","created":1765734075,"model":"Kimi-K2-Instruct","choices":[],"usage":{"prompt_tokens":31,"total_tokens":46,"completion_tokens":15,"prompt_tokens_details":{"cached_tokens":2},"reasoning_tokens":0}}`,
+		`[DONE]`,
+	}
+
+	expectedClaudeRespJSON := []string{
+		`{"type":"message_start","message":{"id":"c91dda37dc3c4018ac0fecf81cf0052d","type":"message","role":"assistant","content":[],"model":"Kimi-K2-Instruct","usage":{"input_tokens":0,"output_tokens":0}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I'm"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" Kim"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"i"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":","}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" a"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" large"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" language"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" model"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" trained"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" by"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" Moon"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"shot"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" AI"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"."}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":29,"output_tokens":15,"cache_read_input_tokens":2}}`,
 		`{"type":"message_stop"}`,
 	}
 
@@ -1405,7 +1499,7 @@ func TestChatCompletionsToClaudeMessages_convertNonStreamResponse_WithReasoning(
 		],
 		"stop_reason": "end_turn",
 		"usage": {
-			"input_tokens": 9,
+			"input_tokens": 5,
 			"output_tokens": 329,
 			"cache_read_input_tokens": 4
 		}
@@ -1458,7 +1552,7 @@ func TestChatCompletionsToClaudeMessages_convertStreamResponse_WithReasoning(t *
 		`{"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "语言"}}`,
 		`{"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "模型"}}`,
 		`{"type": "content_block_stop", "index": 1}`,
-		`{"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"input_tokens": 9, "output_tokens": 1024, "cache_read_input_tokens": 7}}`,
+		`{"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"input_tokens": 2, "output_tokens": 1024, "cache_read_input_tokens": 7}}`,
 		`{"type": "message_stop"}`,
 	}
 	testChatCompletionsToClaudeMessages_convertStreamResponse(t, openaiResp, exceptClaudeResp)
