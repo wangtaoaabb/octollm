@@ -1,9 +1,11 @@
 package openai
 
+import "encoding/json"
+
 // CompletionRequest represents the request structure for OpenAI /v1/completions API (legacy)
 type CompletionRequest struct {
 	Model            string             `json:"model"`
-	Prompt           *any               `json:"prompt" binding:"required"` // Can be string or array of strings
+	Prompt           json.RawMessage    `json:"prompt" binding:"required"` // Can be string, array of strings, or array of tokens
 	BestOf           *int               `json:"best_of,omitempty"`
 	Echo             *bool              `json:"echo,omitempty"`
 	FrequencyPenalty *float64           `json:"frequency_penalty,omitempty"`

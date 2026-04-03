@@ -155,7 +155,7 @@ type MessageContentToolResult struct {
 type MessageContentSource struct {
 	Type      string           `json:"type"`
 	MediaType string           `json:"media_type,omitempty"`
-	Data      any              `json:"data,omitempty"`
+	Data      json.RawMessage  `json:"data,omitempty"`
 	Content   []MessageContent `json:"content,omitempty"`
 	Url       string           `json:"url,omitempty"`
 }
@@ -244,9 +244,9 @@ type ThinkingConfig struct {
 
 // ToolDefinition for defining tools that the model can use
 type ToolDefinition struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	InputSchema any    `json:"input_schema,omitempty"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	InputSchema json.RawMessage `json:"input_schema,omitempty"`
 
 	CacheControl *MessageCacheControl `json:"cache_control,omitempty"`
 

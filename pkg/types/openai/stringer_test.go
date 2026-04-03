@@ -114,7 +114,7 @@ func TestCompletionRequest_String(t *testing.T) {
 			// "Say this is a test" = 18 bytes; temperature=0 is set so it prints
 			expected: `(CompletionRequest) {
   Model: "gpt-3.5-turbo-instruct"
-  Prompt: len(18)
+  Prompt: len(20)
   MaxTokens: 7
   Temperature: 0.000000
   Stream: false
@@ -127,10 +127,9 @@ func TestCompletionRequest_String(t *testing.T) {
 				"prompt": ["Hello", " ", "World"],
 				"max_tokens": 100
 			}`,
-			// JSON array unmarshals into []interface{}, hits default %T branch
 			expected: `(CompletionRequest) {
   Model: "gpt-3.5-turbo-instruct"
-  Prompt: []interface {}
+  Prompt: array(23)
   MaxTokens: 100
   Stream: false
 }`,
@@ -145,7 +144,7 @@ func TestCompletionRequest_String(t *testing.T) {
 			// "Test" = 4 bytes
 			expected: `(CompletionRequest) {
   Model: "gpt-3.5-turbo-instruct"
-  Prompt: len(4)
+  Prompt: len(6)
   Stream: true
 }`,
 		},
@@ -158,7 +157,7 @@ func TestCompletionRequest_String(t *testing.T) {
 			}`,
 			expected: `(CompletionRequest) {
   Model: "gpt-3.5-turbo-instruct"
-  Prompt: len(4)
+  Prompt: len(6)
   Stream: false
   LogProbs: true
 }`,

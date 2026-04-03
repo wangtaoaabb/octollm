@@ -161,19 +161,21 @@ func (e *ChatCompletionToClaudeMessages) convertRequestBody(ctx context.Context,
 							Text: *contentBlock.Text,
 						})
 					}
-				case anthropic.MessageContentImageType:
-					if contentBlock.Source != nil {
-						url := ""
-						if contentBlock.Source.Type == "base64" && contentBlock.Source.Data != nil {
-							mediaType := "image/jpeg"
-							if contentBlock.Source.MediaType != "" {
-								mediaType = contentBlock.Source.MediaType
-							}
-							dataStr := fmt.Sprintf("%v", contentBlock.Source.Data)
-							url = fmt.Sprintf("data:%s;base64,%s", mediaType, dataStr)
-						} else if contentBlock.Source.Type == "url" {
-							url = contentBlock.Source.Url
+			case anthropic.MessageContentImageType:
+				if contentBlock.Source != nil {
+					url := ""
+					if contentBlock.Source.Type == "base64" && len(contentBlock.Source.Data) > 0 {
+						mediaType := "image/jpeg"
+						if contentBlock.Source.MediaType != "" {
+							mediaType = contentBlock.Source.MediaType
 						}
+						var dataStr string
+						if err := json.Unmarshal(contentBlock.Source.Data, &dataStr); err == nil {
+							url = fmt.Sprintf("data:%s;base64,%s", mediaType, dataStr)
+						}
+					} else if contentBlock.Source.Type == "url" {
+						url = contentBlock.Source.Url
+					}
 						contentParts = append(contentParts, &openai.MessageContentItem{
 							Type: "image_url",
 							ImageURL: &openai.MessageContentItemImageURL{
@@ -266,24 +268,12 @@ func (e *ChatCompletionToClaudeMessages) convertRequestBody(ctx context.Context,
 		if tool.Name == "" {
 			continue
 		}
-		var params json.RawMessage
-		if tool.InputSchema != nil {
-			if raw, ok := tool.InputSchema.(json.RawMessage); ok {
-				params = raw
-			} else {
-				// Try to marshal it
-				paramsBytes, err := json.Marshal(tool.InputSchema)
-				if err == nil {
-					params = paramsBytes
-				}
-			}
-		}
 		dst.Tools = append(dst.Tools, &openai.Tool{
 			Type: "function",
 			Function: openai.ToolFunction{
 				Name:        &tool.Name,
 				Description: &tool.Description,
-				Parameters:  params,
+				Parameters:  tool.InputSchema,
 			},
 		})
 	}

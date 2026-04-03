@@ -100,13 +100,13 @@ func TestShardKeyConcurrency_No_ShardKey(t *testing.T) {
 		require.NoError(t, err)
 
 		var wg sync.WaitGroup
-		for range 30 {
+		for range 150 {
 			req := testhelper.CreateTestRequest()
 			wg.Go(func() {
 				_, err := lb.Process(req)
 				assert.NoError(t, err)
 			})
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(1 * time.Millisecond)
 		}
 
 		cur1Val := cur1.Load()
@@ -147,7 +147,7 @@ func TestShardKeyConcurrency_No_ShardKey(t *testing.T) {
 		require.NoError(t, err)
 
 		var wg sync.WaitGroup
-		for i := range 60 {
+		for i := range 300 {
 			req := testhelper.CreateTestRequest()
 			wg.Go(func() {
 				if i%2 == 0 {

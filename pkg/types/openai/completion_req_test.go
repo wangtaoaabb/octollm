@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 )
@@ -23,17 +24,13 @@ func TestCompletionRequest_UnmarshalJSON_String(t *testing.T) {
 		t.Errorf("Expected model 'gpt-3.5-turbo-instruct', got '%s'", req.Model)
 	}
 
-	if req.Prompt == nil {
+	if len(req.Prompt) == 0 {
 		t.Fatal("Prompt is nil")
 	}
 
-	promptStr, ok := (*req.Prompt).(string)
-	if !ok {
-		t.Fatalf("Expected string prompt, got %T", *req.Prompt)
-	}
-
-	if promptStr != "Say this is a test" {
-		t.Errorf("Expected prompt 'Say this is a test', got '%s'", promptStr)
+	wantPrompt := json.RawMessage(`"Say this is a test"`)
+	if !bytes.Equal(req.Prompt, wantPrompt) {
+		t.Errorf("Expected prompt raw JSON %s, got %s", wantPrompt, req.Prompt)
 	}
 
 	if req.MaxTokens == nil || *req.MaxTokens != 7 {
@@ -44,7 +41,7 @@ func TestCompletionRequest_UnmarshalJSON_String(t *testing.T) {
 func TestCompletionRequest_UnmarshalJSON_Array(t *testing.T) {
 	jsonStr := `{
 		"model": "gpt-3.5-turbo-instruct",
-		"prompt": ["Hello", " ", "World"],
+		"prompt": ["Hello",     " ", "World"],
 		"max_tokens": 100
 	}`
 
@@ -54,31 +51,22 @@ func TestCompletionRequest_UnmarshalJSON_Array(t *testing.T) {
 		t.Fatalf("Failed to unmarshal: %v", err)
 	}
 
-	if req.Prompt == nil {
+	if len(req.Prompt) == 0 {
 		t.Fatal("Prompt is nil")
 	}
 
-	promptArr, ok := (*req.Prompt).([]interface{})
-	if !ok {
-		t.Fatalf("Expected array prompt, got %T", *req.Prompt)
-	}
-
-	if len(promptArr) != 3 {
-		t.Errorf("Expected 3 items, got %d", len(promptArr))
-	}
-
-	if promptArr[0].(string) != "Hello" || promptArr[1].(string) != " " || promptArr[2].(string) != "World" {
-		t.Error("Prompt array values don't match")
+	wantPrompt := json.RawMessage(`["Hello",     " ", "World"]`)
+	if !bytes.Equal(req.Prompt, wantPrompt) {
+		t.Errorf("Expected prompt raw JSON %s, got %s", wantPrompt, req.Prompt)
 	}
 }
 
 func TestCompletionRequest_MarshalJSON_String(t *testing.T) {
 	maxTokens := 50
 	temp := 0.7
-	var prompt any = "Test prompt"
 	req := CompletionRequest{
 		Model:       "gpt-3.5-turbo-instruct",
-		Prompt:      &prompt,
+		Prompt:      json.RawMessage(`"Test prompt"`),
 		MaxTokens:   &maxTokens,
 		Temperature: &temp,
 	}
@@ -104,11 +92,9 @@ func TestCompletionRequest_MarshalJSON_String(t *testing.T) {
 }
 
 func TestCompletionRequest_MarshalJSON_Array(t *testing.T) {
-	promptArr := []string{"First", "Second"}
-	var promptAny any = promptArr
 	req := CompletionRequest{
 		Model:  "gpt-3.5-turbo-instruct",
-		Prompt: &promptAny,
+		Prompt: json.RawMessage(`["First","Second"]`),
 	}
 
 	data, err := json.Marshal(req)
