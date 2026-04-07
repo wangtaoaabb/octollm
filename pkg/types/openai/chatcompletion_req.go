@@ -156,6 +156,7 @@ type MessageContent interface {
 type MessageContentString string
 
 func (m MessageContentString) ExtractText() string { return string(m) }
+
 func (m MessageContentString) MarshalJSON() ([]byte, error) {
 	return json.Marshal(string(m))
 }
@@ -183,6 +184,7 @@ func (m MessageContentArray) ExtractText() string {
 	}
 	return text
 }
+
 func (m MessageContentArray) MarshalJSON() ([]byte, error) {
 	return json.Marshal([]*MessageContentItem(m))
 }
