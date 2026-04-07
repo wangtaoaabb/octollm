@@ -9,6 +9,7 @@ require (
 	github.com/alibabacloud-go/tea-utils/v2 v2.0.7
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/anthropics/anthropic-sdk-go v1.19.0
+	github.com/buger/jsonparser v1.1.1
 	github.com/expr-lang/expr v1.17.6
 	github.com/gin-contrib/gzip v1.2.5
 	github.com/gin-contrib/slog v1.2.0
