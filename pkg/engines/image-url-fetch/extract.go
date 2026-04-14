@@ -1,31 +1,44 @@
 package image_url_fetch
 
 import (
+	"strings"
+
+	"github.com/infinigence/octollm/pkg/types/anthropic"
 	"github.com/infinigence/octollm/pkg/types/openai"
 )
 
-// ExtractOpenAIChatImageURLRefs returns OpenAI-style remote image_url references in part order.
-// MessageContentString and nil content yield nil. Unknown concrete types yield nil.
-//
-// For Anthropic Messages (ClaudeMessagesRequest), add a separate ExtractClaude* function
-// that produces OpenAIChatImageURLRef only if shapes align, or a dedicated ref type + path method.
-func ExtractOpenAIChatImageURLRefs(c openai.MessageContent) []OpenAIChatImageURLRef {
+// collectOpenAIImageReplaceJobs walks Chat Completions messages[].content / reasoning_content multipart arrays.
+func collectOpenAIImageReplaceJobs(req *openai.ChatCompletionRequest) []imageReplaceJob {
+	if req == nil {
+		return nil
+	}
+	var jobs []imageReplaceJob
+	for msgIndex, msg := range req.Messages {
+		if msg == nil {
+			continue
+		}
+		if msg.Content != nil {
+			jobs = append(jobs, collectFromOpenAIMessageContent(msgIndex, "content", msg.Content)...)
+		}
+		if msg.ReasoningContent != nil {
+			jobs = append(jobs, collectFromOpenAIMessageContent(msgIndex, "reasoning_content", msg.ReasoningContent)...)
+		}
+	}
+	return jobs
+}
+
+// collectFromOpenAIMessageContent collects image_url parts from one message field (multipart array), same role as
+// collectFromClaudeContentSlice for a single content array (no nesting in OpenAI multipart).
+func collectFromOpenAIMessageContent(msgIndex int, field string, c openai.MessageContent) []imageReplaceJob {
 	if c == nil {
 		return nil
 	}
-	switch v := c.(type) {
-	case openai.MessageContentString:
-		return nil
-	case openai.MessageContentArray:
-		return extractOpenAIRefsFromArray(v)
-	default:
+	arr, ok := c.(openai.MessageContentArray)
+	if !ok {
 		return nil
 	}
-}
-
-func extractOpenAIRefsFromArray(m openai.MessageContentArray) []OpenAIChatImageURLRef {
-	var refs []OpenAIChatImageURLRef
-	for i, item := range m {
+	var jobs []imageReplaceJob
+	for i, item := range arr {
 		if item == nil || item.ImageURL == nil {
 			continue
 		}
@@ -37,11 +50,78 @@ func extractOpenAIRefsFromArray(m openai.MessageContentArray) []OpenAIChatImageU
 			continue
 		}
 		_, isObject := item.ImageURL.(*openai.MessageContentItemImageURL)
-		refs = append(refs, OpenAIChatImageURLRef{
-			PartIndex:    i,
-			URL:          u,
-			IsObjectForm: isObject,
+		jobs = append(jobs, imageReplaceJob{
+			kind: imageReplaceJobOpenAI,
+			openai: openaiImageReplaceJob{
+				MsgIndex:     msgIndex,
+				Field:        field,
+				PartIndex:    i,
+				URL:          u,
+				IsObjectForm: isObject,
+			},
 		})
 	}
-	return refs
+	return jobs
+}
+
+// collectClaudeImageReplaceJobs walks Claude messages[].content and nested tool_result.content for
+// type=image blocks with source.type=url and a non-data remote URL.
+func collectClaudeImageReplaceJobs(req *anthropic.ClaudeMessagesRequest) []imageReplaceJob {
+	if req == nil {
+		return nil
+	}
+	var jobs []imageReplaceJob
+	for msgIndex, msg := range req.Messages {
+		if msg == nil || len(msg.Content) == 0 {
+			continue
+		}
+		jobs = append(jobs, collectFromClaudeContentSlice(msgIndex, nil, msg.Content)...)
+	}
+	return jobs
+}
+
+func collectFromClaudeContentSlice(msgIndex int, prefix []int, items []anthropic.MessageContent) []imageReplaceJob {
+	var jobs []imageReplaceJob
+	for i, mc := range items {
+		if mc == nil {
+			continue
+		}
+		pathToBlock := appendCopy(prefix, i)
+		switch v := mc.(type) {
+		case anthropic.MessageContentString:
+			continue
+		case *anthropic.MessageContentBlock:
+			if v == nil {
+				continue
+			}
+			if v.Type == anthropic.MessageContentImageType && v.Source != nil &&
+				strings.EqualFold(strings.TrimSpace(v.Source.Type), "url") {
+				u := strings.TrimSpace(v.Source.Url)
+				if u != "" && !strings.HasPrefix(strings.ToLower(u), "data:") {
+					jobs = append(jobs, imageReplaceJob{
+						kind: imageReplaceJobClaude,
+						claude: claudeImageReplaceJob{
+							MsgIndex:       msgIndex,
+							ContentIndices: append([]int(nil), pathToBlock...),
+							URL:            u,
+						},
+					})
+				}
+			}
+			if v.Type == anthropic.MessageContentToolResultType && v.MessageContentToolResult != nil &&
+				len(v.MessageContentToolResult.Content) > 0 {
+				jobs = append(jobs, collectFromClaudeContentSlice(msgIndex, pathToBlock, v.MessageContentToolResult.Content)...)
+			}
+		default:
+			continue
+		}
+	}
+	return jobs
+}
+
+func appendCopy(prefix []int, idx int) []int {
+	out := make([]int, len(prefix)+1)
+	copy(out, prefix)
+	out[len(prefix)] = idx
+	return out
 }

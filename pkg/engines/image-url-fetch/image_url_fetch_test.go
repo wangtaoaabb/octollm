@@ -11,11 +11,14 @@ import (
 	"time"
 
 	"github.com/infinigence/octollm/pkg/octollm"
+	"github.com/infinigence/octollm/pkg/types/anthropic"
 	"github.com/infinigence/octollm/pkg/types/openai"
 	"github.com/stretchr/testify/require"
 )
 
 var testChatBodyParser = &octollm.JSONParser[openai.ChatCompletionRequest]{}
+
+var testClaudeBodyParser = &octollm.JSONParser[anthropic.ClaudeMessagesRequest]{}
 
 func TestImageURLFetchEngine_inlineObjectForm(t *testing.T) {
 	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
@@ -285,4 +288,87 @@ func TestImageURLFetchEngine_multiMessagesMixedImageParts(t *testing.T) {
 	require.True(t, ok)
 	require.Contains(t, reason[1].ImageURL.GetImageUrl(), "data:image/png;base64,"+wantB64A)
 	require.Equal(t, embeddedJPEG, reason[2].ImageURL.GetImageUrl())
+}
+
+func TestImageURLFetchEngine_claudeTopLevelAndToolResult(t *testing.T) {
+	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(pngBytes)
+	}))
+	t.Cleanup(srv.Close)
+
+	topURL := srv.URL + "/top.png"
+	nestedURL := srv.URL + "/nested.png"
+	secondMsgURL := srv.URL + "/msg1.png"
+	raw := []byte(fmt.Sprintf(`{"model":"m","max_tokens":100,"messages":[
+		{"role":"user","content":[
+			{"type":"text","text":"x"},
+			{"type":"image","source":{"type":"url","url":%q}},
+			{"type":"tool_result","tool_use_id":"tu_1","content":[
+				{"type":"image","source":{"type":"url","url":%q}}
+			]}
+		]},
+		{"role":"user","content":[
+			{"type":"image","source":{"type":"url","url":%q}}
+		]}
+	]}`, topURL, nestedURL, secondMsgURL))
+
+	var nextBody []byte
+	next := octollm.EngineFunc(func(req *octollm.Request) (*octollm.Response, error) {
+		b, err := req.Body.Bytes()
+		require.NoError(t, err)
+		nextBody = b
+		return octollm.NewNonStreamResponse(200, nil, octollm.NewBodyFromBytes([]byte(`{}`), nil)), nil
+	})
+
+	eng := NewImageURLFetchEngine(ImageURLFetchConfig{
+		Next:       next,
+		HTTPClient: srv.Client(),
+		Timeout:    5 * time.Second,
+	})
+	u := octollm.NewRequest(httptest.NewRequest(http.MethodPost, "/", nil), octollm.APIFormatClaudeMessages)
+	u.Body = octollm.NewBodyFromBytes(raw, testClaudeBodyParser)
+
+	_, err := eng.Process(u)
+	require.NoError(t, err)
+
+	var out anthropic.ClaudeMessagesRequest
+	require.NoError(t, json.Unmarshal(nextBody, &out))
+	require.Len(t, out.Messages, 2)
+	require.Len(t, out.Messages[0].Content, 3)
+	require.Len(t, out.Messages[1].Content, 1)
+
+	topImg, ok := out.Messages[0].Content[1].(*anthropic.MessageContentBlock)
+	require.True(t, ok)
+	require.Equal(t, anthropic.MessageContentImageType, topImg.Type)
+	require.NotNil(t, topImg.Source)
+	require.Equal(t, "base64", topImg.Source.Type)
+	require.Equal(t, "image/png", topImg.Source.MediaType)
+
+	nestedTool, ok := out.Messages[0].Content[2].(*anthropic.MessageContentBlock)
+	require.True(t, ok)
+	require.Equal(t, anthropic.MessageContentToolResultType, nestedTool.Type)
+	require.NotNil(t, nestedTool.MessageContentToolResult)
+	require.Len(t, nestedTool.MessageContentToolResult.Content, 1)
+	nestedImg, ok := nestedTool.MessageContentToolResult.Content[0].(*anthropic.MessageContentBlock)
+	require.True(t, ok)
+	wantB64 := base64.StdEncoding.EncodeToString(pngBytes)
+	var topData, nestedData string
+	require.NoError(t, json.Unmarshal(topImg.Source.Data, &topData))
+	require.NoError(t, json.Unmarshal(nestedImg.Source.Data, &nestedData))
+	require.Equal(t, wantB64, topData)
+	require.Equal(t, "base64", nestedImg.Source.Type)
+	require.Equal(t, "image/png", nestedImg.Source.MediaType)
+	require.Equal(t, wantB64, nestedData)
+
+	secondImg, ok := out.Messages[1].Content[0].(*anthropic.MessageContentBlock)
+	require.True(t, ok)
+	require.Equal(t, anthropic.MessageContentImageType, secondImg.Type)
+	require.NotNil(t, secondImg.Source)
+	require.Equal(t, "base64", secondImg.Source.Type)
+	require.Equal(t, "image/png", secondImg.Source.MediaType)
+	var secondData string
+	require.NoError(t, json.Unmarshal(secondImg.Source.Data, &secondData))
+	require.Equal(t, wantB64, secondData)
 }
