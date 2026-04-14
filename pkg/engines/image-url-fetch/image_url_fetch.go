@@ -15,15 +15,17 @@ import (
 
 	"github.com/buger/jsonparser"
 	"github.com/infinigence/octollm/pkg/octollm"
+	"github.com/infinigence/octollm/pkg/types/anthropic"
 	"github.com/infinigence/octollm/pkg/types/openai"
 )
 
 var ErrImageURLFetch = errors.New("image url fetch engine")
 
-// ImageURLFetchEngine downloads remote image_url targets in chat completion requests,
-// replaces them with data:...;base64,... using jsonparser.Set on the raw body.
+// ImageURLFetchEngine downloads remote images and inlines them in the raw JSON body via jsonparser.Set.
+// OpenAI Chat Completions: image_url fields become data:...;base64,... strings.
+// Anthropic Messages: image source.type "url" is replaced by the official base64 source object (type, media_type, data).
 // Array indices in paths must use bracket syntax ("[0]", "[1]"); see jsonparser.searchKeys.
-// URL discovery uses ExtractOpenAIChatImageURLRefs (this package).
+// URL discovery uses collectOpenAIImageReplaceJobs / collectClaudeImageReplaceJobs (extract.go).
 type ImageURLFetchEngine struct {
 	Next       octollm.Engine
 	HTTPClient *http.Client
@@ -67,14 +69,22 @@ func NewImageURLFetchEngine(cfg ImageURLFetchConfig) *ImageURLFetchEngine {
 	}
 }
 
+type imageReplaceJobKind uint8
+
+const (
+	imageReplaceJobOpenAI imageReplaceJobKind = iota
+	imageReplaceJobClaude
+)
+
+// imageReplaceJob describes one jsonparser.Set replacement. Use kind; OpenAI data is in openai, Claude in claude.
 type imageReplaceJob struct {
-	msgIndex int
-	field    string // "content" or "reasoning_content"
-	ref      OpenAIChatImageURLRef
+	kind   imageReplaceJobKind
+	openai openaiImageReplaceJob
+	claude claudeImageReplaceJob
 }
 
 // extractImageReplaceJobsFromBody inspects the unified body like moderator.OpenAIAdapter.ExtractTextFromBody:
-// it uses Parsed() and switches on concrete types; only *openai.ChatCompletionRequest yields image jobs.
+// it uses Parsed() and switches on concrete types; *openai.ChatCompletionRequest and *anthropic.ClaudeMessagesRequest yield image jobs.
 // A nil body or unsupported parsed type is logged and yields (nil, nil) so the engine passes the request through.
 // The body must have a non-nil Parser (e.g. JSONParser[openai.ChatCompletionRequest]); Parsed() calls parser.Parse and a nil parser panics.
 func extractImageReplaceJobsFromBody(ctx context.Context, body *octollm.UnifiedBody) ([]imageReplaceJob, error) {
@@ -89,7 +99,9 @@ func extractImageReplaceJobsFromBody(ctx context.Context, body *octollm.UnifiedB
 	}
 	switch p := parsed.(type) {
 	case *openai.ChatCompletionRequest:
-		return collectImageReplaceJobs(p), nil
+		return collectOpenAIImageReplaceJobs(p), nil
+	case *anthropic.ClaudeMessagesRequest:
+		return collectClaudeImageReplaceJobs(p), nil
 	default:
 		slog.WarnContext(ctx, "[ImageURLFetchEngine] unsupported body type for image inlining; skip",
 			slog.String("type", fmt.Sprintf("%T", parsed)))
@@ -113,7 +125,7 @@ func (e *ImageURLFetchEngine) Process(req *octollm.Request) (*octollm.Response, 
 
 	unique := make(map[string]struct{})
 	for _, j := range jobs {
-		u := strings.TrimSpace(j.ref.URL)
+		u := jobRemoteURL(j)
 		if u == "" || strings.HasPrefix(strings.ToLower(u), "data:") {
 			continue
 		}
@@ -131,9 +143,9 @@ func (e *ImageURLFetchEngine) Process(req *octollm.Request) (*octollm.Response, 
 		wg.Add(1)
 		go func(imageURL string) {
 			defer wg.Done()
-			dataURL, ferr := e.fetchAndEncode(ctx, imageURL)
+			mediaType, rawB64, ferr := e.fetchRemoteImage(ctx, imageURL)
 			mu.Lock()
-			result[imageURL] = fetchImageResult{dataURL: dataURL, err: ferr}
+			result[imageURL] = fetchImageResult{mediaType: mediaType, rawBase64: rawB64, err: ferr}
 			mu.Unlock()
 		}(u)
 	}
@@ -147,18 +159,36 @@ func (e *ImageURLFetchEngine) Process(req *octollm.Request) (*octollm.Response, 
 
 	out := body
 	for _, job := range jobs {
-		u := strings.TrimSpace(job.ref.URL)
+		u := jobRemoteURL(job)
 		if u == "" || strings.HasPrefix(strings.ToLower(u), "data:") {
 			continue
 		}
-		dataURL := result[u].dataURL
-		if dataURL == "" {
+		fr := result[u]
+		if fr.mediaType == "" && fr.rawBase64 == "" {
 			continue
 		}
-		path := job.ref.JSONParserPath(job.msgIndex, job.field)
-		encoded, mErr := json.Marshal(dataURL)
+		var encoded []byte
+		var path []string
+		var mErr error
+		switch job.kind {
+		case imageReplaceJobOpenAI:
+			dataURL := fmt.Sprintf("data:%s;base64,%s", fr.mediaType, fr.rawBase64)
+			encoded, mErr = json.Marshal(dataURL)
+			path = job.openai.jsonParserPath()
+		case imageReplaceJobClaude:
+			// https://docs.anthropic.com/en/api/messages — image with base64 source
+			src := map[string]string{
+				"type":       "base64",
+				"media_type": fr.mediaType,
+				"data":       fr.rawBase64,
+			}
+			encoded, mErr = json.Marshal(src)
+			path = job.claude.jsonParserPathToSource()
+		default:
+			continue
+		}
 		if mErr != nil {
-			return nil, fmt.Errorf("%w: marshal data url: %w", ErrImageURLFetch, mErr)
+			return nil, fmt.Errorf("%w: marshal inline payload: %w", ErrImageURLFetch, mErr)
 		}
 		var setErr error
 		out, setErr = jsonparser.Set(out, encoded, path...)
@@ -168,7 +198,7 @@ func (e *ImageURLFetchEngine) Process(req *octollm.Request) (*octollm.Response, 
 	}
 
 	req.Body.SetBytes(out)
-	slog.DebugContext(req.Context(), "[ImageURLFetchEngine] inlined remote image_url parts")
+	slog.DebugContext(req.Context(), "[ImageURLFetchEngine] inlined remote image parts")
 
 	resp, err := e.Next.Process(req)
 	if err != nil {
@@ -179,47 +209,39 @@ func (e *ImageURLFetchEngine) Process(req *octollm.Request) (*octollm.Response, 
 }
 
 type fetchImageResult struct {
-	dataURL string
-	err     error
+	mediaType string
+	rawBase64 string
+	err       error
 }
 
-func collectImageReplaceJobs(chatReq *openai.ChatCompletionRequest) []imageReplaceJob {
-	var jobs []imageReplaceJob
-	for i, msg := range chatReq.Messages {
-		if msg == nil {
-			continue
-		}
-		if msg.Content != nil {
-			for _, ref := range ExtractOpenAIChatImageURLRefs(msg.Content) {
-				jobs = append(jobs, imageReplaceJob{msgIndex: i, field: "content", ref: ref})
-			}
-		}
-		if msg.ReasoningContent != nil {
-			for _, ref := range ExtractOpenAIChatImageURLRefs(msg.ReasoningContent) {
-				jobs = append(jobs, imageReplaceJob{msgIndex: i, field: "reasoning_content", ref: ref})
-			}
-		}
+func jobRemoteURL(j imageReplaceJob) string {
+	switch j.kind {
+	case imageReplaceJobClaude:
+		return j.claude.remoteURL()
+	case imageReplaceJobOpenAI:
+		return j.openai.remoteURL()
+	default:
+		return ""
 	}
-	return jobs
 }
 
-func (e *ImageURLFetchEngine) fetchAndEncode(ctx context.Context, url string) (string, error) {
+func (e *ImageURLFetchEngine) fetchRemoteImage(ctx context.Context, url string) (mediaType string, rawBase64 string, err error) {
 	maxAttempts := e.retryCount + 1
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		dataURL, err := e.fetchAndEncodeOnce(ctx, url)
+		mt, b64, err := e.fetchRemoteImageOnce(ctx, url)
 		if err == nil {
-			return dataURL, nil
+			return mt, b64, nil
 		}
 		lastErr = err
 	}
-	return "", lastErr
+	return "", "", lastErr
 }
 
-func (e *ImageURLFetchEngine) fetchAndEncodeOnce(ctx context.Context, url string) (string, error) {
+func (e *ImageURLFetchEngine) fetchRemoteImageOnce(ctx context.Context, url string) (mediaType string, rawBase64 string, err error) {
 	attemptTimeout := e.timeout
 	if attemptTimeout <= 0 {
 		attemptTimeout = 10 * time.Second
@@ -229,15 +251,15 @@ func (e *ImageURLFetchEngine) fetchAndEncodeOnce(ctx context.Context, url string
 
 	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	resp, err := e.HTTPClient.Do(httpReq)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+		return "", "", fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	contentType := resp.Header.Get("Content-Type")
 	if !strings.HasPrefix(contentType, "image/") {
@@ -248,8 +270,8 @@ func (e *ImageURLFetchEngine) fetchAndEncodeOnce(ctx context.Context, url string
 	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	b64 := base64.StdEncoding.EncodeToString(data)
-	return fmt.Sprintf("data:%s;base64,%s", contentType, b64), nil
+	return contentType, b64, nil
 }
