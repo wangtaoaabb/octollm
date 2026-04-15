@@ -10,9 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/infinigence/octollm/pkg/engines/image-url-fetch/metrics"
 	"github.com/infinigence/octollm/pkg/octollm"
 	"github.com/infinigence/octollm/pkg/types/anthropic"
 	"github.com/infinigence/octollm/pkg/types/openai"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,15 +40,16 @@ func TestImageURLFetchEngine_inlineObjectForm(t *testing.T) {
 		return octollm.NewNonStreamResponse(200, nil, octollm.NewBodyFromBytes([]byte(`{}`), nil)), nil
 	})
 
-	eng := NewImageURLFetchEngine(ImageURLFetchConfig{
+	eng, err := NewImageURLFetchEngine(ImageURLFetchConfig{
 		Next:       next,
 		HTTPClient: srv.Client(),
 		Timeout:    5 * time.Second,
 	})
+	require.NoError(t, err)
 	u := octollm.NewRequest(httptest.NewRequest(http.MethodPost, "/", nil), octollm.APIFormatChatCompletions)
 	u.Body = octollm.NewBodyFromBytes(raw, testChatBodyParser)
 
-	_, err := eng.Process(u)
+	_, err = eng.Process(u)
 	require.NoError(t, err)
 
 	var out openai.ChatCompletionRequest
@@ -77,15 +80,16 @@ func TestImageURLFetchEngine_inlineStringForm(t *testing.T) {
 		return octollm.NewNonStreamResponse(200, nil, octollm.NewBodyFromBytes([]byte(`{}`), nil)), nil
 	})
 
-	eng := NewImageURLFetchEngine(ImageURLFetchConfig{
+	eng, err := NewImageURLFetchEngine(ImageURLFetchConfig{
 		Next:       next,
 		HTTPClient: srv.Client(),
 		Timeout:    5 * time.Second,
 	})
+	require.NoError(t, err)
 	u := octollm.NewRequest(httptest.NewRequest(http.MethodPost, "/", nil), octollm.APIFormatChatCompletions)
 	u.Body = octollm.NewBodyFromBytes(raw, testChatBodyParser)
 
-	_, err := eng.Process(u)
+	_, err = eng.Process(u)
 	require.NoError(t, err)
 
 	var out openai.ChatCompletionRequest
@@ -106,12 +110,13 @@ func TestImageURLFetchEngine_unsupportedParsedTypePassesThrough(t *testing.T) {
 		require.JSONEq(t, `{"model":"ada","input":"x"}`, string(b))
 		return octollm.NewNonStreamResponse(200, nil, octollm.NewBodyFromBytes([]byte(`{}`), nil)), nil
 	})
-	eng := NewImageURLFetchEngine(ImageURLFetchConfig{Next: next})
+	eng, err := NewImageURLFetchEngine(ImageURLFetchConfig{Next: next})
+	require.NoError(t, err)
 	raw := []byte(`{"model":"ada","input":"x"}`)
 	u := octollm.NewRequest(httptest.NewRequest(http.MethodPost, "/", nil), octollm.APIFormatChatCompletions)
 	u.Body = octollm.NewBodyFromBytes(raw, &octollm.JSONParser[openai.EmbeddingRequest]{})
 
-	_, err := eng.Process(u)
+	_, err = eng.Process(u)
 	require.NoError(t, err)
 	require.True(t, called)
 }
@@ -122,11 +127,12 @@ func TestImageURLFetchEngine_nilBodyPassesThrough(t *testing.T) {
 		called = true
 		return octollm.NewNonStreamResponse(200, nil, octollm.NewBodyFromBytes([]byte(`{}`), nil)), nil
 	})
-	eng := NewImageURLFetchEngine(ImageURLFetchConfig{Next: next})
+	eng, err := NewImageURLFetchEngine(ImageURLFetchConfig{Next: next})
+	require.NoError(t, err)
 	u := octollm.NewRequest(httptest.NewRequest(http.MethodPost, "/", nil), octollm.APIFormatChatCompletions)
 	u.Body = nil
 
-	_, err := eng.Process(u)
+	_, err = eng.Process(u)
 	require.NoError(t, err)
 	require.True(t, called)
 }
@@ -136,7 +142,8 @@ func TestImageURLFetchEngine_configDefaultsHTTPClient(t *testing.T) {
 	next := octollm.EngineFunc(func(req *octollm.Request) (*octollm.Response, error) {
 		return octollm.NewNonStreamResponse(200, nil, octollm.NewBodyFromBytes([]byte(`{}`), nil)), nil
 	})
-	eng := NewImageURLFetchEngine(ImageURLFetchConfig{Next: next})
+	eng, err := NewImageURLFetchEngine(ImageURLFetchConfig{Next: next})
+	require.NoError(t, err)
 	require.NotNil(t, eng.HTTPClient)
 	require.Equal(t, 0, eng.retryCount)
 	require.Equal(t, 10*time.Second, eng.timeout)
@@ -146,8 +153,138 @@ func TestImageURLFetchEngine_negativeRetryClamped(t *testing.T) {
 	next := octollm.EngineFunc(func(req *octollm.Request) (*octollm.Response, error) {
 		return octollm.NewNonStreamResponse(200, nil, octollm.NewBodyFromBytes([]byte(`{}`), nil)), nil
 	})
-	eng := NewImageURLFetchEngine(ImageURLFetchConfig{Next: next, RetryCount: -3})
+	eng, err := NewImageURLFetchEngine(ImageURLFetchConfig{Next: next, RetryCount: -3})
+	require.NoError(t, err)
 	require.Equal(t, 0, eng.retryCount)
+}
+
+func TestImageURLFetchEngine_CacheModeFile_requiresRoot(t *testing.T) {
+	t.Parallel()
+	next := octollm.EngineFunc(func(req *octollm.Request) (*octollm.Response, error) {
+		return octollm.NewNonStreamResponse(200, nil, octollm.NewBodyFromBytes([]byte(`{}`), nil)), nil
+	})
+	_, err := NewImageURLFetchEngine(ImageURLFetchConfig{Next: next, CacheMode: CacheModeFile})
+	require.Error(t, err)
+}
+
+func TestImageURLFetchEngine_telemetryMode_noPayloadCache(t *testing.T) {
+	t.Parallel()
+	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
+	var httpCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		httpCalls++
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(pngBytes)
+	}))
+	t.Cleanup(srv.Close)
+
+	raw := []byte(fmt.Sprintf(`{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":%q}}]}]}`, srv.URL+"/x"))
+
+	next := octollm.EngineFunc(func(req *octollm.Request) (*octollm.Response, error) {
+		return octollm.NewNonStreamResponse(200, nil, octollm.NewBodyFromBytes([]byte(`{}`), nil)), nil
+	})
+	reg := prometheus.NewRegistry()
+	met, err := metrics.New(reg)
+	require.NoError(t, err)
+
+	eng, err := NewImageURLFetchEngine(ImageURLFetchConfig{
+		Next:       next,
+		HTTPClient: srv.Client(),
+		Timeout:    5 * time.Second,
+		CacheMode:  CacheModeTelemetry,
+		Metrics:    met,
+	})
+	require.NoError(t, err)
+
+	u := octollm.NewRequest(httptest.NewRequest(http.MethodPost, "/", nil), octollm.APIFormatChatCompletions)
+	u.Body = octollm.NewBodyFromBytes(raw, testChatBodyParser)
+	_, err = eng.Process(u)
+	require.NoError(t, err)
+	u2 := octollm.NewRequest(httptest.NewRequest(http.MethodPost, "/", nil), octollm.APIFormatChatCompletions)
+	u2.Body = octollm.NewBodyFromBytes(raw, testChatBodyParser)
+	_, err = eng.Process(u2)
+	require.NoError(t, err)
+	require.Equal(t, 2, httpCalls, "telemetry mode still uses HTTP each time; no payload cache")
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	var hits, fetches float64
+	for _, fam := range families {
+		switch fam.GetName() {
+		case "image_url_fetch_cache_hits_total":
+			for _, m := range fam.GetMetric() {
+				hits += m.GetCounter().GetValue()
+			}
+		case "image_url_fetch_http_fetches_total":
+			for _, m := range fam.GetMetric() {
+				fetches += m.GetCounter().GetValue()
+			}
+		}
+	}
+	require.Equal(t, 1.0, hits, "second request is repeat URL → cache_hits_total without storing bytes")
+	require.Equal(t, 1.0, fetches, "only first Process uses engine HTTPClient; second is store hit (IndexHTTPStore still GETs origin for telemetry)")
+}
+
+func TestImageURLFetchEngine_fileCache_avoidsSecondHTTP(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
+	var httpCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		httpCalls++
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(pngBytes)
+	}))
+	t.Cleanup(srv.Close)
+
+	raw := []byte(fmt.Sprintf(`{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":%q}}]}]}`, srv.URL+"/x"))
+
+	next := octollm.EngineFunc(func(req *octollm.Request) (*octollm.Response, error) {
+		return octollm.NewNonStreamResponse(200, nil, octollm.NewBodyFromBytes([]byte(`{}`), nil)), nil
+	})
+	reg := prometheus.NewRegistry()
+	met, err := metrics.New(reg)
+	require.NoError(t, err)
+
+	eng, err := NewImageURLFetchEngine(ImageURLFetchConfig{
+		Next:          next,
+		HTTPClient:    srv.Client(),
+		Timeout:       5 * time.Second,
+		CacheMode:     CacheModeFile,
+		CacheFileRoot: root,
+		Metrics:       met,
+	})
+	require.NoError(t, err)
+
+	u := octollm.NewRequest(httptest.NewRequest(http.MethodPost, "/", nil), octollm.APIFormatChatCompletions)
+	u.Body = octollm.NewBodyFromBytes(raw, testChatBodyParser)
+	_, err = eng.Process(u)
+	require.NoError(t, err)
+	require.Equal(t, 1, httpCalls)
+
+	u2 := octollm.NewRequest(httptest.NewRequest(http.MethodPost, "/", nil), octollm.APIFormatChatCompletions)
+	u2.Body = octollm.NewBodyFromBytes(raw, testChatBodyParser)
+	_, err = eng.Process(u2)
+	require.NoError(t, err)
+	require.Equal(t, 1, httpCalls, "second request should hit on-disk cache")
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	var hits, fetches float64
+	for _, fam := range families {
+		switch fam.GetName() {
+		case "image_url_fetch_cache_hits_total":
+			for _, m := range fam.GetMetric() {
+				hits += m.GetCounter().GetValue()
+			}
+		case "image_url_fetch_http_fetches_total":
+			for _, m := range fam.GetMetric() {
+				fetches += m.GetCounter().GetValue()
+			}
+		}
+	}
+	require.Equal(t, 1.0, fetches)
+	require.Equal(t, 1.0, hits)
 }
 
 func TestExtractImageReplaceJobsFromBody_embeddingTypeNoJobs(t *testing.T) {
@@ -250,11 +387,12 @@ func TestImageURLFetchEngine_multiMessagesMixedImageParts(t *testing.T) {
 		return octollm.NewNonStreamResponse(200, nil, octollm.NewBodyFromBytes([]byte(`{}`), nil)), nil
 	})
 
-	eng := NewImageURLFetchEngine(ImageURLFetchConfig{
+	eng, err := NewImageURLFetchEngine(ImageURLFetchConfig{
 		Next:       next,
 		HTTPClient: srv.Client(),
 		Timeout:    10 * time.Second,
 	})
+	require.NoError(t, err)
 	u := octollm.NewRequest(httptest.NewRequest(http.MethodPost, "/", nil), octollm.APIFormatChatCompletions)
 	u.Body = octollm.NewBodyFromBytes(raw, testChatBodyParser)
 
@@ -322,15 +460,16 @@ func TestImageURLFetchEngine_claudeTopLevelAndToolResult(t *testing.T) {
 		return octollm.NewNonStreamResponse(200, nil, octollm.NewBodyFromBytes([]byte(`{}`), nil)), nil
 	})
 
-	eng := NewImageURLFetchEngine(ImageURLFetchConfig{
+	eng, err := NewImageURLFetchEngine(ImageURLFetchConfig{
 		Next:       next,
 		HTTPClient: srv.Client(),
 		Timeout:    5 * time.Second,
 	})
+	require.NoError(t, err)
 	u := octollm.NewRequest(httptest.NewRequest(http.MethodPost, "/", nil), octollm.APIFormatClaudeMessages)
 	u.Body = octollm.NewBodyFromBytes(raw, testClaudeBodyParser)
 
-	_, err := eng.Process(u)
+	_, err = eng.Process(u)
 	require.NoError(t, err)
 
 	var out anthropic.ClaudeMessagesRequest

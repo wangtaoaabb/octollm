@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -14,6 +13,10 @@ import (
 	"time"
 
 	"github.com/buger/jsonparser"
+	"github.com/infinigence/octollm/pkg/engines/image-url-fetch/cache"
+	"github.com/infinigence/octollm/pkg/engines/image-url-fetch/limits"
+	"github.com/infinigence/octollm/pkg/engines/image-url-fetch/metrics"
+	"github.com/infinigence/octollm/pkg/engines/image-url-fetch/readbody"
 	"github.com/infinigence/octollm/pkg/octollm"
 	"github.com/infinigence/octollm/pkg/types/anthropic"
 	"github.com/infinigence/octollm/pkg/types/openai"
@@ -32,7 +35,28 @@ type ImageURLFetchEngine struct {
 
 	retryCount int
 	timeout    time.Duration
+
+	// MaxBytesPerURL is the maximum decoded image size per remote URL; 0 disables.
+	maxBytesPerURL int64
+	// MaxBytesPerRequest is the maximum sum of decoded sizes for unique remote URLs in one request; 0 disables.
+	maxBytesPerRequest int64
+	notifier           limits.ImageFetchLimitNotifier
+
+	store   cache.Store
+	metrics *metrics.M
 }
+
+// CacheMode selects how remote image bytes are cached when Cache is nil.
+type CacheMode int
+
+const (
+	// CacheModeNone disables caching (always fetch over HTTP).
+	CacheModeNone CacheMode = iota
+	// CacheModeTelemetry uses IndexHTTPStore: only an in-memory index; Get refetches over HTTP.
+	CacheModeTelemetry
+	// CacheModeFile persists payloads under CacheFileRoot on disk.
+	CacheModeFile
+)
 
 var _ octollm.Engine = (*ImageURLFetchEngine)(nil)
 
@@ -45,10 +69,23 @@ type ImageURLFetchConfig struct {
 	RetryCount int
 	// Timeout is per fetch attempt. Zero defaults to 10s.
 	Timeout time.Duration
+	// Limits configures per-URL / per-request byte caps and optional notifier. Zero value disables limits.
+	Limits limits.ImageURLFetchLimits
+
+	// Cache, if non-nil, is used as the cache store; CacheMode and CacheFileRoot are ignored.
+	Cache cache.Store
+	// CacheMode selects a built-in store when Cache is nil. Default is CacheModeNone.
+	CacheMode CacheMode
+	// CacheFileRoot is the on-disk root when CacheMode is CacheModeFile (required for that mode).
+	CacheFileRoot string
+
+	// Metrics is optional Prometheus instrumentation; nil disables.
+	Metrics *metrics.M
 }
 
 // NewImageURLFetchEngine wraps cfg.Next. Applies defaults: HTTPClient -> DefaultClient, Timeout -> 10s, RetryCount >= 0.
-func NewImageURLFetchEngine(cfg ImageURLFetchConfig) *ImageURLFetchEngine {
+// Returns an error when CacheModeFile has an empty CacheFileRoot, or when NewFileStore / NewIndexHTTPStore fails.
+func NewImageURLFetchEngine(cfg ImageURLFetchConfig) (*ImageURLFetchEngine, error) {
 	retry := cfg.RetryCount
 	if retry < 0 {
 		retry = 0
@@ -61,12 +98,54 @@ func NewImageURLFetchEngine(cfg ImageURLFetchConfig) *ImageURLFetchEngine {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	return &ImageURLFetchEngine{
-		Next:       cfg.Next,
-		HTTPClient: client,
-		retryCount: retry,
-		timeout:    timeout,
+
+	var store cache.Store
+	if cfg.Cache != nil {
+		store = cfg.Cache
+	} else if cfg.CacheMode == CacheModeTelemetry {
+		ix, err := cache.NewIndexHTTPStore(cache.IndexHTTPStoreConfig{
+			HTTPClient:     client,
+			MaxBytesPerURL: cfg.Limits.MaxBytesPerURL,
+			Metrics:        cfg.Metrics,
+		})
+		if err != nil {
+			return nil, err
+		}
+		store = ix
+	} else if cfg.CacheMode == CacheModeFile {
+		root := strings.TrimSpace(cfg.CacheFileRoot)
+		if root == "" {
+			return nil, fmt.Errorf("%w: CacheModeFile requires non-empty CacheFileRoot", ErrImageURLFetch)
+		}
+		fs, err := cache.NewFileStore(root)
+		if err != nil {
+			return nil, err
+		}
+		store = fs
 	}
+
+	return &ImageURLFetchEngine{
+		Next:               cfg.Next,
+		HTTPClient:         client,
+		retryCount:         retry,
+		timeout:            timeout,
+		maxBytesPerURL:     cfg.Limits.MaxBytesPerURL,
+		maxBytesPerRequest: cfg.Limits.MaxBytesPerRequest,
+		notifier:           cfg.Limits.Notifier,
+		store:              store,
+		metrics:            cfg.Metrics,
+	}, nil
+}
+
+func (e *ImageURLFetchEngine) notifyLimit(ctx context.Context, ev limits.ImageLimitEvent) {
+	if e == nil || e.notifier == nil {
+		return
+	}
+	_ = e.notifier.OnLimitExceeded(ctx, ev)
+}
+
+func (e *ImageURLFetchEngine) Store() cache.Store {
+	return e.store
 }
 
 type imageReplaceJobKind uint8
@@ -143,9 +222,9 @@ func (e *ImageURLFetchEngine) Process(req *octollm.Request) (*octollm.Response, 
 		wg.Add(1)
 		go func(imageURL string) {
 			defer wg.Done()
-			mediaType, rawB64, ferr := e.fetchRemoteImage(ctx, imageURL)
+			mediaType, rawB64, n, ferr := e.fetchRemoteImage(ctx, imageURL)
 			mu.Lock()
-			result[imageURL] = fetchImageResult{mediaType: mediaType, rawBase64: rawB64, err: ferr}
+			result[imageURL] = fetchImageResult{mediaType: mediaType, rawBase64: rawB64, decodedBytes: n, err: ferr}
 			mu.Unlock()
 		}(u)
 	}
@@ -155,6 +234,22 @@ func (e *ImageURLFetchEngine) Process(req *octollm.Request) (*octollm.Response, 
 		if r.err != nil {
 			return nil, fmt.Errorf("%w: fetch image %q: %w", ErrImageURLFetch, u, r.err)
 		}
+	}
+
+	var sumDecoded int64
+	for u := range unique {
+		sumDecoded += result[u].decodedBytes
+	}
+	if maxReq := e.maxBytesPerRequest; maxReq > 0 && sumDecoded > maxReq {
+		e.notifyLimit(ctx, limits.ImageLimitEvent{
+			Kind:        limits.ImageLimitPerRequest,
+			LimitBytes:  maxReq,
+			ActualBytes: sumDecoded,
+		})
+		return nil, fmt.Errorf("%w: total image bytes %d exceeds limit %d: %w", ErrImageURLFetch, sumDecoded, maxReq, limits.ErrTotalImageSizeExceeded)
+	}
+	if e.metrics != nil {
+		e.metrics.ObserveRequestSumBytes(sumDecoded)
 	}
 
 	out := body
@@ -209,9 +304,10 @@ func (e *ImageURLFetchEngine) Process(req *octollm.Request) (*octollm.Response, 
 }
 
 type fetchImageResult struct {
-	mediaType string
-	rawBase64 string
-	err       error
+	mediaType    string
+	rawBase64    string
+	decodedBytes int64
+	err          error
 }
 
 func jobRemoteURL(j imageReplaceJob) string {
@@ -225,23 +321,23 @@ func jobRemoteURL(j imageReplaceJob) string {
 	}
 }
 
-func (e *ImageURLFetchEngine) fetchRemoteImage(ctx context.Context, url string) (mediaType string, rawBase64 string, err error) {
+func (e *ImageURLFetchEngine) fetchRemoteImage(ctx context.Context, url string) (mediaType string, rawBase64 string, decodedBytes int64, err error) {
 	maxAttempts := e.retryCount + 1
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		mt, b64, err := e.fetchRemoteImageOnce(ctx, url)
+		mt, b64, n, err := e.fetchRemoteImageOnce(ctx, url)
 		if err == nil {
-			return mt, b64, nil
+			return mt, b64, n, nil
 		}
 		lastErr = err
 	}
-	return "", "", lastErr
+	return "", "", 0, lastErr
 }
 
-func (e *ImageURLFetchEngine) fetchRemoteImageOnce(ctx context.Context, url string) (mediaType string, rawBase64 string, err error) {
+func (e *ImageURLFetchEngine) fetchRemoteImageOnce(ctx context.Context, url string) (mediaType string, rawBase64 string, decodedBytes int64, err error) {
 	attemptTimeout := e.timeout
 	if attemptTimeout <= 0 {
 		attemptTimeout = 10 * time.Second
@@ -249,29 +345,82 @@ func (e *ImageURLFetchEngine) fetchRemoteImageOnce(ctx context.Context, url stri
 	reqCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
 	defer cancel()
 
+	if e.store != nil {
+		key := cache.KeyForURL(url)
+		if data, meta, ok, gerr := e.store.Get(reqCtx, key); gerr != nil {
+			return "", "", 0, gerr
+		} else if ok {
+			// Cache/index hit: do not ObserveDecodedBytes/IncHTTPFetches here to avoid double-counting size
+			// and to keep http_fetches_total as engine-origin HTTP only (see metrics package comment).
+			if e.metrics != nil {
+				e.metrics.IncCacheHits()
+			}
+			ct := readbody.NormalizeImageContentType(meta.ContentType)
+			b64 := base64.StdEncoding.EncodeToString(data)
+			return ct, b64, int64(len(data)), nil
+		}
+	}
+
 	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", "", err
+		return "", "", 0, err
 	}
+
+	httpStart := time.Now()
 	resp, err := e.HTTPClient.Do(httpReq)
 	if err != nil {
-		return "", "", err
+		return "", "", 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("HTTP %d", resp.StatusCode)
+		return "", "", 0, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	contentType := resp.Header.Get("Content-Type")
-	if !strings.HasPrefix(contentType, "image/") {
-		contentType = "image/jpeg"
+
+	maxBytesPerURL := e.maxBytesPerURL
+	if maxBytesPerURL > 0 {
+		if cl := readbody.ParseContentLength(resp); cl >= 0 && cl > maxBytesPerURL {
+			e.notifyLimit(ctx, limits.ImageLimitEvent{
+				Kind:        limits.ImageLimitPerURL,
+				ImageURL:    url,
+				LimitBytes:  maxBytesPerURL,
+				ActualBytes: cl,
+			})
+			return "", "", 0, fmt.Errorf("Content-Length %d exceeds limit %d: %w", cl, maxBytesPerURL, limits.ErrPerImageSizeExceeded)
+		}
 	}
-	if idx := strings.Index(contentType, ";"); idx > 0 {
-		contentType = strings.TrimSpace(contentType[:idx])
-	}
-	data, err := io.ReadAll(resp.Body)
+
+	contentType := readbody.NormalizeImageContentType(resp.Header.Get("Content-Type"))
+
+	data, err := readbody.ReadLimited(resp.Body, maxBytesPerURL)
 	if err != nil {
-		return "", "", err
+		return "", "", 0, err
 	}
+	if maxBytesPerURL > 0 && int64(len(data)) > maxBytesPerURL {
+		n := int64(len(data))
+		e.notifyLimit(ctx, limits.ImageLimitEvent{
+			Kind:        limits.ImageLimitPerURL,
+			ImageURL:    url,
+			LimitBytes:  maxBytesPerURL,
+			ActualBytes: n,
+		})
+		return "", "", 0, fmt.Errorf("body size %d exceeds limit %d: %w", len(data), maxBytesPerURL, limits.ErrPerImageSizeExceeded)
+	}
+
+	if e.metrics != nil {
+		e.metrics.ObserveHTTPFetchDuration(time.Since(httpStart))
+		e.metrics.ObserveDecodedBytes(int64(len(data)))
+		e.metrics.IncHTTPFetches()
+	}
+	k := cache.KeyForURL(url)
+	if e.store != nil {
+		if putErr := e.store.Put(reqCtx, k, data, cache.Meta{ContentType: contentType, SourceURL: url}); putErr != nil {
+			slog.WarnContext(ctx, "[ImageURLFetchEngine] cache Put failed; continuing without persisting this image",
+				slog.String("err", putErr.Error()),
+				slog.String("key", k),
+				slog.String("url", url))
+		}
+	}
+
 	b64 := base64.StdEncoding.EncodeToString(data)
-	return contentType, b64, nil
+	return contentType, b64, int64(len(data)), nil
 }
