@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"unicode"
 
 	"github.com/infinigence/octollm/pkg/octollm"
@@ -26,6 +27,12 @@ type TextModeratorAdapter interface {
 	GetReplacementBody(ctx context.Context, body *octollm.UnifiedBody) *octollm.UnifiedBody
 }
 
+// TextModeratorEngine runs text moderation around the next engine.
+//
+// When ModerateInput or ModerateOutput is set, the matching *float64 field gates each
+// ModeratorService.Allow call on that path with an independent draw: nil always calls Allow;
+// *r with r<=0 skips Allow; r>=1 always calls Allow; 0<r<1 calls Allow with probability r.
+// For streaming output, each periodic flush and the tail flush roll separately.
 type TextModeratorEngine struct {
 	ModeratorService     TextModeratorService
 	TextModeratorAdapter TextModeratorAdapter
@@ -33,6 +40,12 @@ type TextModeratorEngine struct {
 	ModerateInput       bool
 	ModerateOutput      bool
 	ModerateStreamEvery int
+
+	// Input moderation sampling when ModerateInput is true (semantics on TextModeratorEngine).
+	InputModerationSampleRate *float64
+
+	// Output moderation sampling when ModerateOutput is true (semantics on TextModeratorEngine).
+	OutputModerationSampleRate *float64
 
 	Next octollm.Engine
 }
@@ -69,6 +82,23 @@ func GetIsSpam(req *octollm.Request) (bool, bool) {
 	return isSpam, ok
 }
 
+// moderationSampleHit reports whether the next ModeratorService.Allow call should run for this sample rate.
+// nil means no sampling (always true). A non-nil value uses r: r<=0 is false, r>=1 is true,
+// otherwise rand.Float64() < r.
+func moderationSampleHit(rate *float64) bool {
+	if rate == nil {
+		return true
+	}
+	switch r := *rate; {
+	case r <= 0:
+		return false
+	case r >= 1:
+		return true
+	default:
+		return rand.Float64() < r
+	}
+}
+
 var _ octollm.Engine = (*TextModeratorEngine)(nil)
 
 func (e *TextModeratorEngine) Process(req *octollm.Request) (*octollm.Response, error) {
@@ -84,7 +114,7 @@ func (e *TextModeratorEngine) Process(req *octollm.Request) (*octollm.Response, 
 			// truncate text to last max rune len
 			text = text[len(text)-maxRuneLen:]
 		}
-		if len(text) != 0 {
+		if len(text) != 0 && moderationSampleHit(e.InputModerationSampleRate) {
 			if err := e.ModeratorService.Allow(req.Context(), text); err != nil {
 				return nil, fmt.Errorf("%w: %w", ErrInputNotAllowed, err)
 			}
@@ -95,6 +125,7 @@ func (e *TextModeratorEngine) Process(req *octollm.Request) (*octollm.Response, 
 	if err != nil {
 		return nil, err
 	}
+
 	if !e.ModerateOutput {
 		return resp, nil
 	}
@@ -115,15 +146,17 @@ func (e *TextModeratorEngine) Process(req *octollm.Request) (*octollm.Response, 
 		if len(text) == 0 {
 			return resp, nil
 		}
-		if err := e.ModeratorService.Allow(req.Context(), text); err != nil {
-			replacement := e.TextModeratorAdapter.GetReplacementBody(req.Context(), resp.Body)
-			resp.Body.Close()
-			req.SetMetadataValue(isSpamKey, true)
-			if replacement != nil {
-				resp.Body = replacement
-				return resp, nil
+		if moderationSampleHit(e.OutputModerationSampleRate) {
+			if err := e.ModeratorService.Allow(req.Context(), text); err != nil {
+				replacement := e.TextModeratorAdapter.GetReplacementBody(req.Context(), resp.Body)
+				resp.Body.Close()
+				req.SetMetadataValue(isSpamKey, true)
+				if replacement != nil {
+					resp.Body = replacement
+					return resp, nil
+				}
+				return nil, fmt.Errorf("%w: %w", ErrOutputNotAllowed, err)
 			}
-			return nil, fmt.Errorf("%w: %w", ErrOutputNotAllowed, err)
 		}
 		return resp, nil
 	}
@@ -169,7 +202,7 @@ func (e *TextModeratorEngine) Process(req *octollm.Request) (*octollm.Response, 
 			chunkCountSinceLast++
 			if chunkCountSinceLast >= moderateEvery {
 				textBufferTrimmed := trimRune(textBuffer)
-				if len(textBufferTrimmed) != 0 {
+				if len(textBufferTrimmed) != 0 && moderationSampleHit(e.OutputModerationSampleRate) {
 					if err := e.ModeratorService.Allow(ctx, textBufferTrimmed); err != nil {
 						slog.DebugContext(ctx, fmt.Sprintf("moderate stream chunk error: %s", err))
 						moderationFailedErr = fmt.Errorf("%w: %w", ErrOutputNotAllowed, err)
@@ -192,7 +225,7 @@ func (e *TextModeratorEngine) Process(req *octollm.Request) (*octollm.Response, 
 		if moderationFailedErr == nil && len(chunkBuffer) > 0 {
 			slog.DebugContext(ctx, fmt.Sprintf("[moderate] processing %d remaining chunks", len(chunkBuffer)))
 			textBufferTrimmed := trimRune(textBuffer)
-			if len(textBufferTrimmed) != 0 {
+			if len(textBufferTrimmed) != 0 && moderationSampleHit(e.OutputModerationSampleRate) {
 				if err := e.ModeratorService.Allow(ctx, textBufferTrimmed); err != nil {
 					slog.DebugContext(ctx, fmt.Sprintf("moderate remaining stream chunks error: %s", err))
 					moderationFailedErr = fmt.Errorf("%w: %w", ErrOutputNotAllowed, err)
