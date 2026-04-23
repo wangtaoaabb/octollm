@@ -19,7 +19,7 @@ type ClaudeMessagesResponse struct {
 // UnmarshalJSON implements custom JSON unmarshaling for ClaudeMessagesResponse
 func (r *ClaudeMessagesResponse) UnmarshalJSON(data []byte) error {
 	type Alias ClaudeMessagesResponse
-	aux := &struct {
+	aux := struct {
 		Content json.RawMessage `json:"content"`
 		*Alias
 	}{
@@ -82,7 +82,7 @@ type ClaudeMessagesStreamEvent struct {
 // UnmarshalJSON implements custom JSON unmarshaling for ClaudeMessagesStreamEvent
 func (e *ClaudeMessagesStreamEvent) UnmarshalJSON(data []byte) error {
 	type Alias ClaudeMessagesStreamEvent
-	aux := &struct {
+	aux := struct {
 		ContentBlockRaw json.RawMessage `json:"content_block,omitempty"`
 		*Alias
 	}{

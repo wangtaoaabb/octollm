@@ -35,6 +35,19 @@ func TestClaudeMessagesStreamEvent_UnmarshalJSON_ContentBlockStart(t *testing.T)
 	assert.Equal(t, "", *block.Text)
 }
 
+func TestClaudeMessagesStreamEvent_UnmarshalJSON_TopLevelNull(t *testing.T) {
+	var event ClaudeMessagesStreamEvent
+	err := json.Unmarshal([]byte(`null`), &event)
+	require.NoError(t, err)
+
+	assert.Equal(t, "", event.Type)
+	assert.Nil(t, event.Index)
+	assert.Nil(t, event.Message)
+	assert.Nil(t, event.ContentBlock)
+	assert.Nil(t, event.Usage)
+	assert.Nil(t, event.Error)
+	assert.Nil(t, event.DeltaRaw)
+}
 func TestClaudeMessagesStreamEvent_UnmarshalJSON_ContentBlockStartWithToolUse(t *testing.T) {
 	// 模拟 tool_use 类型的 content_block_start 事件
 	jsonStr := `{
@@ -204,4 +217,14 @@ func TestClaudeMessagesStreamEvent_CheckMethods(t *testing.T) {
 			assert.Equal(t, tt.expected, tt.checkFn(&event))
 		})
 	}
+}
+
+func TestClaudeMessagesResponse_UnmarshalJSON_TopLevelNull(t *testing.T) {
+	var event ClaudeMessagesResponse
+	err := json.Unmarshal([]byte(`null`), &event)
+	require.NoError(t, err)
+
+	assert.Equal(t, "", event.Type)
+	assert.Equal(t, "", event.ID)
+	assert.Nil(t, event.StopSequence)
 }

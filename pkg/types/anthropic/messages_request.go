@@ -310,7 +310,7 @@ func (r ClaudeMessagesRequest) MarshalJSON() ([]byte, error) {
 
 func (r *ClaudeMessagesRequest) UnmarshalJSON(data []byte) error {
 	type Alias ClaudeMessagesRequest
-	aux := &struct {
+	aux := struct {
 		System json.RawMessage `json:"system,omitempty"`
 		*Alias
 	}{
@@ -345,7 +345,7 @@ func (r *ClaudeMessagesRequest) UnmarshalJSON(data []byte) error {
 
 func (m *MessageContentBlock) UnmarshalJSON(data []byte) error {
 	type Alias MessageContentBlock
-	aux := &struct {
+	aux := struct {
 		Citations []Citation      `json:"citations"`
 		Content   json.RawMessage `json:"content,omitempty"`
 		*Alias
@@ -401,7 +401,7 @@ func (m *MessageContentBlock) UnmarshalJSON(data []byte) error {
 func (m *MessageParam) UnmarshalJSON(data []byte) error {
 	// First try to unmarshal as normal structure with content array
 	type Alias MessageParam
-	aux := &struct {
+	aux := struct {
 		Content json.RawMessage `json:"content"`
 		*Alias
 	}{

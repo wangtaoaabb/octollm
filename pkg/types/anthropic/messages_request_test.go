@@ -193,6 +193,30 @@ func TestApiMessagesRequest_MarshalJSON_WithSystemString(t *testing.T) {
 	assert.Equal(t, "You are a helpful assistant", system)
 }
 
+func TestApiMessagesRequest_MarshalJSON_WithTopNull(t *testing.T) {
+	jsonStr := `null`
+	var req ClaudeMessagesRequest
+	err := json.Unmarshal([]byte(jsonStr), &req)
+	require.NoError(t, err)
+
+	assert.Equal(t, "", req.Model)
+	assert.Equal(t, int64(0), req.MaxTokens)
+	require.Len(t, req.Messages, 0)
+}
+func TestApiMessagesRequest_UnmarshalJSON_WithTopNull(t *testing.T) {
+	jsonStr := `null`
+	var req MessageContentBlock
+	err := json.Unmarshal([]byte(jsonStr), &req)
+	require.NoError(t, err)
+
+	assert.Nil(t, req.Text)
+}
+func TestApiMessageParam_UnmarshalJSON_WithToolResult(t *testing.T) {
+	jsonStr := `null`
+	var req MessageParam
+	err := json.Unmarshal([]byte(jsonStr), &req)
+	require.ErrorContains(t, err, "content field cannot be null or empty")
+}
 func TestApiMessagesRequest_MarshalJSON_WithMultiSystem(t *testing.T) {
 	text := "Hello!"
 	req := &ClaudeMessagesRequest{
