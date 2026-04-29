@@ -85,8 +85,8 @@ func TestClaudeAdapter_ExtractTextFromNonStreamResponse(t *testing.T) {
 		Role:       "assistant",
 		Model:      "claude-3-5-sonnet-20241022",
 		StopReason: "end_turn",
-		Content: []anthropic.MessageContentBlock{
-			{
+		Content: []*anthropic.MessageContentBlock{
+			&anthropic.MessageContentBlock{
 				Type: "text",
 				Text: &text,
 			},
@@ -129,16 +129,20 @@ func TestClaudeAdapter_extractTextFromNonStreamResponse_JSON_skips_null_and_tool
 	adapter := &ClaudeAdapter{}
 	got, err := adapter.extractTextFromNonStreamResponse(context.Background(), &resp)
 	require.NoError(t, err)
-	require.Len(t, resp.Content, 1)
 
-	// null 元素被 UnmarshalJSON 过滤掉，只剩 tool_use 块
-	assert.Equal(t, "tool_use", resp.Content[0].Type)
-	require.NotNil(t, resp.Content[0].MessageContentToolUse)
-	assert.Equal(t, "call_xxx", resp.Content[0].MessageContentToolUse.ID)
-	assert.Equal(t, "Read", resp.Content[0].MessageContentToolUse.Name)
-	assert.Equal(t, json.RawMessage([]byte(`null`)), resp.Content[0].MessageContentToolUse.Input)
+	// 标准解码器保留 null 元素为 nil 指针，不过滤，len == 2
+	require.Len(t, resp.Content, 2)
+	assert.Nil(t, resp.Content[0])
 
-	// ExtractText 对 tool_use 返回 input 一次；tool 分支再 append 一次 → "nullnull"
+	require.NotNil(t, resp.Content[1])
+	assert.Equal(t, "tool_use", resp.Content[1].Type)
+	require.NotNil(t, resp.Content[1].MessageContentToolUse)
+	assert.Equal(t, "call_xxx", resp.Content[1].MessageContentToolUse.ID)
+	assert.Equal(t, "Read", resp.Content[1].MessageContentToolUse.Name)
+	assert.Equal(t, json.RawMessage([]byte(`null`)), resp.Content[1].MessageContentToolUse.Input)
+
+	// nil 元素被 extractTextFromNonStreamResponse 里的 block==nil continue 跳过
+	// tool_use: ExtractText 返回 "null"，tool 分支再 append 一次 → "nullnull"
 	assert.Equal(t, "nullnull", string(got))
 }
 
@@ -178,8 +182,8 @@ func TestClaudeAdapter_ExtractTextWithRepetition(t *testing.T) {
 		Role:       "assistant",
 		Model:      "claude-3-5-sonnet-20241022",
 		StopReason: "end_turn",
-		Content: []anthropic.MessageContentBlock{
-			{
+		Content: []*anthropic.MessageContentBlock{
+			&anthropic.MessageContentBlock{
 				Type: "text",
 				Text: &repeatedText,
 			},
@@ -207,8 +211,8 @@ func TestClaudeAdapter_GetReplacementNonStreamResponse(t *testing.T) {
 		Role:       "assistant",
 		Model:      "claude-3-5-sonnet-20241022",
 		StopReason: "end_turn",
-		Content: []anthropic.MessageContentBlock{
-			{
+		Content: []*anthropic.MessageContentBlock{
+			&anthropic.MessageContentBlock{
 				Type: "text",
 				Text: &originalText,
 			},
@@ -283,8 +287,8 @@ func TestUniversalAdapter_ClaudeFormat(t *testing.T) {
 		Role:       "assistant",
 		Model:      "claude-3-5-sonnet-20241022",
 		StopReason: "end_turn",
-		Content: []anthropic.MessageContentBlock{
-			{
+		Content: []*anthropic.MessageContentBlock{
+			&anthropic.MessageContentBlock{
 				Type: "text",
 				Text: &text,
 			},

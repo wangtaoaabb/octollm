@@ -360,7 +360,7 @@ func (e *ChatCompletionToClaudeMessages) convertNonStreamResponseBody(ctx contex
 		msg := choice.Message
 		if msg != nil {
 			if msg.ReasoningContent != nil {
-				claudeResp.Content = append(claudeResp.Content, anthropic.MessageContentBlock{
+				claudeResp.Content = append(claudeResp.Content, &anthropic.MessageContentBlock{
 					Type: "thinking",
 					MessageContentThinking: &anthropic.MessageContentThinking{
 						Thinking: msg.ReasoningContent.ExtractText(),
@@ -371,10 +371,10 @@ func (e *ChatCompletionToClaudeMessages) convertNonStreamResponseBody(ctx contex
 			if msg.Content != nil {
 				text := msg.Content.ExtractText()
 				if text != "" {
-				claudeResp.Content = append(claudeResp.Content, anthropic.MessageContentBlock{
-					Type: "text",
-					Text: &text,
-				})
+					claudeResp.Content = append(claudeResp.Content, &anthropic.MessageContentBlock{
+						Type: "text",
+						Text: &text,
+					})
 				}
 			}
 
@@ -383,14 +383,14 @@ func (e *ChatCompletionToClaudeMessages) convertNonStreamResponseBody(ctx contex
 				if toolCall.Function == nil {
 					continue
 				}
-			claudeResp.Content = append(claudeResp.Content, anthropic.MessageContentBlock{
-				Type: "tool_use",
-				MessageContentToolUse: &anthropic.MessageContentToolUse{
-					ID:    toolCall.ID,
-					Name:  toolCall.Function.Name,
-					Input: json.RawMessage(toolCall.Function.Arguments),
-				},
-			})
+				claudeResp.Content = append(claudeResp.Content, &anthropic.MessageContentBlock{
+					Type: "tool_use",
+					MessageContentToolUse: &anthropic.MessageContentToolUse{
+						ID:    toolCall.ID,
+						Name:  toolCall.Function.Name,
+						Input: json.RawMessage(toolCall.Function.Arguments),
+					},
+				})
 			}
 		}
 	}
@@ -523,7 +523,7 @@ func (e *ChatCompletionToClaudeMessages) convertStreamResponse(req *octollm.Requ
 						Type:    "message",
 						Role:    "assistant",
 						Model:   model,
-						Content: []anthropic.MessageContentBlock{},
+						Content: []*anthropic.MessageContentBlock{},
 						Usage:   &anthropic.Usage{InputTokens: 0, OutputTokens: 0}, // Placeholder
 					},
 				}

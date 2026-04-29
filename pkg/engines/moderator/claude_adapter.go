@@ -67,6 +67,9 @@ func (a *ClaudeAdapter) extractTextFromNonStreamResponse(ctx context.Context, bo
 	r := []rune{}
 
 	for _, block := range body.Content {
+		if block == nil {
+			continue
+		}
 		r = append(r, []rune(block.ExtractText())...)
 
 		// 如果是 tool_use，额外提取 input（ExtractText 已返回一次，此处补充追加）
@@ -104,6 +107,9 @@ func (a *ClaudeAdapter) extractTextFromStreamResponse(ctx context.Context, body 
 	// 从 message_start 中提取初始内容
 	if body.Type == "message_start" && body.Message != nil {
 		for _, block := range body.Message.Content {
+			if block == nil {
+				continue
+			}
 			r = append(r, []rune(block.ExtractText())...)
 		}
 	}
@@ -155,7 +161,7 @@ func (a *ClaudeAdapter) getReplacementNonStreamResponse(ctx context.Context, res
 		Role:       "assistant",
 		Model:      resp.Model,
 		StopReason: a.ReplacementStopReason,
-		Content: []anthropic.MessageContentBlock{
+		Content: []*anthropic.MessageContentBlock{
 			{
 				Type: "text",
 				Text: &text,
