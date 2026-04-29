@@ -87,6 +87,9 @@ func (a *OpenAIAdapter) extractTextFromStreamResponse(ctx context.Context, body 
 
 // extractTextFromMessage 从 Message 中提取文本内容
 func (a *OpenAIAdapter) extractTextFromMessage(msg *openai.Message) []rune {
+	if msg == nil {
+		return nil
+	}
 	r := []rune{}
 
 	// 提取 Content

@@ -47,6 +47,33 @@ func TestClaudeAdapter_ExtractTextFromRequest(t *testing.T) {
 	assert.Contains(t, textStr, "I'm doing great, thank you!")
 }
 
+func TestClaudeAdapter_extractTextFromRequest_JSON_messages_null_skipped(t *testing.T) {
+	// messages 数组里的 JSON null 解成 []*MessageParam 的元素 nil → msg == nil、不会 panic，只收集非 nil 消息
+	jsonStr := `{
+		"model": "claude-3-5-sonnet-20241022",
+		"max_tokens": 1024,
+		"messages": [
+			null,
+			{
+				"role": "user",
+				"content": "after-null-slot"
+			}
+		]
+	}`
+
+	var req anthropic.ClaudeMessagesRequest
+	require.NoError(t, json.Unmarshal([]byte(jsonStr), &req))
+
+	require.Len(t, req.Messages, 2)
+	require.Nil(t, req.Messages[0])
+	require.NotNil(t, req.Messages[1])
+
+	adapter := &ClaudeAdapter{}
+	got, err := adapter.extractTextFromRequest(context.Background(), &req)
+	require.NoError(t, err)
+	assert.Equal(t, "after-null-slot", string(got))
+}
+
 func TestClaudeAdapter_ExtractTextFromNonStreamResponse(t *testing.T) {
 	adapter := &ClaudeAdapter{}
 
@@ -58,8 +85,8 @@ func TestClaudeAdapter_ExtractTextFromNonStreamResponse(t *testing.T) {
 		Role:       "assistant",
 		Model:      "claude-3-5-sonnet-20241022",
 		StopReason: "end_turn",
-		Content: []anthropic.MessageContent{
-			&anthropic.MessageContentBlock{
+		Content: []anthropic.MessageContentBlock{
+			{
 				Type: "text",
 				Text: &text,
 			},
@@ -72,6 +99,47 @@ func TestClaudeAdapter_ExtractTextFromNonStreamResponse(t *testing.T) {
 	extractedText, err := adapter.ExtractTextFromBody(context.Background(), body)
 	require.NoError(t, err)
 	assert.Equal(t, "This is a test response.", string(extractedText))
+}
+
+func TestClaudeAdapter_extractTextFromNonStreamResponse_JSON_skips_null_and_tool_use(t *testing.T) {
+	jsonStr := `{
+			"id": "msg_123",
+			"type": "message",
+			"role": "assistant",
+			"content": [
+				null,
+				{
+					"type": "tool_use",
+					"id": "call_xxx",
+					"name": "Read",
+					"input": null
+				}
+			],
+			"model": "claude-3-5-sonnet-20241022",
+			"stop_reason": null,
+			"usage": {
+				"input_tokens": 10,
+				"output_tokens": 0
+			}
+	}`
+
+	var resp anthropic.ClaudeMessagesResponse
+	require.NoError(t, json.Unmarshal([]byte(jsonStr), &resp))
+
+	adapter := &ClaudeAdapter{}
+	got, err := adapter.extractTextFromNonStreamResponse(context.Background(), &resp)
+	require.NoError(t, err)
+	require.Len(t, resp.Content, 1)
+
+	// null 元素被 UnmarshalJSON 过滤掉，只剩 tool_use 块
+	assert.Equal(t, "tool_use", resp.Content[0].Type)
+	require.NotNil(t, resp.Content[0].MessageContentToolUse)
+	assert.Equal(t, "call_xxx", resp.Content[0].MessageContentToolUse.ID)
+	assert.Equal(t, "Read", resp.Content[0].MessageContentToolUse.Name)
+	assert.Equal(t, json.RawMessage([]byte(`null`)), resp.Content[0].MessageContentToolUse.Input)
+
+	// ExtractText 对 tool_use 返回 input 一次；tool 分支再 append 一次 → "nullnull"
+	assert.Equal(t, "nullnull", string(got))
 }
 
 func TestClaudeAdapter_ExtractTextFromStreamResponse(t *testing.T) {
@@ -110,8 +178,8 @@ func TestClaudeAdapter_ExtractTextWithRepetition(t *testing.T) {
 		Role:       "assistant",
 		Model:      "claude-3-5-sonnet-20241022",
 		StopReason: "end_turn",
-		Content: []anthropic.MessageContent{
-			&anthropic.MessageContentBlock{
+		Content: []anthropic.MessageContentBlock{
+			{
 				Type: "text",
 				Text: &repeatedText,
 			},
@@ -139,8 +207,8 @@ func TestClaudeAdapter_GetReplacementNonStreamResponse(t *testing.T) {
 		Role:       "assistant",
 		Model:      "claude-3-5-sonnet-20241022",
 		StopReason: "end_turn",
-		Content: []anthropic.MessageContent{
-			&anthropic.MessageContentBlock{
+		Content: []anthropic.MessageContentBlock{
+			{
 				Type: "text",
 				Text: &originalText,
 			},
@@ -160,12 +228,9 @@ func TestClaudeAdapter_GetReplacementNonStreamResponse(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "content_filtered", claudeResp.StopReason)
 	assert.Len(t, claudeResp.Content, 1)
-
-	block, ok := claudeResp.Content[0].(*anthropic.MessageContentBlock)
-	require.True(t, ok)
-	assert.Equal(t, "text", block.Type)
-	assert.NotNil(t, block.Text)
-	assert.Equal(t, "Content blocked due to policy violation.", *block.Text)
+	assert.Equal(t, "text", claudeResp.Content[0].Type)
+	assert.NotNil(t, claudeResp.Content[0].Text)
+	assert.Equal(t, "Content blocked due to policy violation.", *claudeResp.Content[0].Text)
 }
 
 func TestClaudeAdapter_GetReplacementStreamResponse(t *testing.T) {
@@ -218,8 +283,8 @@ func TestUniversalAdapter_ClaudeFormat(t *testing.T) {
 		Role:       "assistant",
 		Model:      "claude-3-5-sonnet-20241022",
 		StopReason: "end_turn",
-		Content: []anthropic.MessageContent{
-			&anthropic.MessageContentBlock{
+		Content: []anthropic.MessageContentBlock{
+			{
 				Type: "text",
 				Text: &text,
 			},

@@ -6,14 +6,14 @@ import (
 
 // ClaudeMessagesResponse represents a complete Anthropic Messages API response
 type ClaudeMessagesResponse struct {
-	ID           string           `json:"id"`
-	Type         string           `json:"type"`
-	Role         string           `json:"role"`
-	Content      []MessageContent `json:"content"`
-	Model        string           `json:"model"`
-	StopReason   string           `json:"stop_reason,omitempty"`
-	StopSequence *string          `json:"stop_sequence,omitempty"`
-	Usage        *Usage           `json:"usage"`
+	ID           string                `json:"id"`
+	Type         string                `json:"type"`
+	Role         string                `json:"role"`
+	Content      []MessageContentBlock `json:"content"`
+	Model        string                `json:"model"`
+	StopReason   string                `json:"stop_reason,omitempty"`
+	StopSequence *string               `json:"stop_sequence,omitempty"`
+	Usage        *Usage                `json:"usage"`
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for ClaudeMessagesResponse
@@ -30,15 +30,18 @@ func (r *ClaudeMessagesResponse) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	// Parse Content field - it's always an array of content blocks
+	// Parse Content field - it's always an array of content blocks; use pointer-slice to detect and
+	// skip JSON null elements (null unmarshals to nil *MessageContentBlock).
 	if len(aux.Content) > 0 {
 		var contentArray []*MessageContentBlock
 		if err := json.Unmarshal(aux.Content, &contentArray); err != nil {
 			return err
 		}
-		r.Content = make([]MessageContent, len(contentArray))
-		for i, block := range contentArray {
-			r.Content[i] = block
+		r.Content = r.Content[:0]
+		for _, block := range contentArray {
+			if block != nil {
+				r.Content = append(r.Content, *block)
+			}
 		}
 	}
 
@@ -159,15 +162,11 @@ type APIError struct {
 func (r *ClaudeMessagesResponse) ExtractText() string {
 	text := ""
 	for _, block := range r.Content {
-		if blockBlock, ok := block.(*MessageContentBlock); ok {
-			if blockBlock.Type == "text" && blockBlock.Text != nil {
-				text += *blockBlock.Text
-			}
-			if blockBlock.Type == "thinking" && blockBlock.MessageContentThinking != nil {
-				text += blockBlock.MessageContentThinking.Thinking
-			}
-		} else if str, ok := block.(MessageContentString); ok {
-			text += string(str)
+		if block.Type == "text" && block.Text != nil {
+			text += *block.Text
+		}
+		if block.Type == "thinking" && block.MessageContentThinking != nil {
+			text += block.MessageContentThinking.Thinking
 		}
 	}
 	return text
@@ -176,9 +175,10 @@ func (r *ClaudeMessagesResponse) ExtractText() string {
 // ExtractToolUses extracts all tool use blocks from the response
 func (r *ClaudeMessagesResponse) ExtractToolUses() []*MessageContentToolUse {
 	var toolUses []*MessageContentToolUse
-	for _, block := range r.Content {
-		if blockBlock, ok := block.(*MessageContentBlock); ok && blockBlock.Type == "tool_use" && blockBlock.MessageContentToolUse != nil {
-			toolUses = append(toolUses, blockBlock.MessageContentToolUse)
+	for i := range r.Content {
+		block := &r.Content[i]
+		if block.Type == "tool_use" && block.MessageContentToolUse != nil {
+			toolUses = append(toolUses, block.MessageContentToolUse)
 		}
 	}
 	return toolUses
