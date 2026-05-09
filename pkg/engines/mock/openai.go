@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/infinigence/octollm/pkg/errutils"
 	"github.com/infinigence/octollm/pkg/octollm"
 	"github.com/infinigence/octollm/pkg/types/openai"
 )
@@ -43,6 +44,8 @@ func NewWithFixedOutput(outputString string, ttft, tpot time.Duration) *MockEndp
 //	input_len  - Number of prompt tokens. Default: total rune count of all messages
 //	             (with the first-line control params stripped). Affects prompt_tokens in usage.
 //	cached_len - Number of cached prompt tokens. Default: 0. Affects cached_tokens in usage.prompt_tokens_details.
+//	http_status - HTTP status code to return. Default: 200. If set to a non-200 value, the request
+//	              fails after sleeping for ttft duration.
 //
 // Example first message:
 //
@@ -50,6 +53,7 @@ func NewWithFixedOutput(outputString string, ttft, tpot time.Duration) *MockEndp
 //	The rest of the message content goes here.
 type mockParams struct {
 	rawParams    string
+	httpStatus   int
 	ttft         time.Duration
 	tpot         time.Duration
 	output       string
@@ -62,8 +66,9 @@ func (e *MockEndpoint) newMockParams(v *openai.ChatCompletionRequest) *mockParam
 	messages := v.Messages
 	maxTokens := v.MaxTokens
 	p := &mockParams{
-		ttft: e.TTFT,
-		tpot: e.TPOT,
+		ttft:       e.TTFT,
+		tpot:       e.TPOT,
+		httpStatus: 200,
 	}
 
 	outputLen := len([]rune(e.OutputString))
@@ -72,7 +77,7 @@ func (e *MockEndpoint) newMockParams(v *openai.ChatCompletionRequest) *mockParam
 
 	totalRunes := 0
 	if len(messages) > 0 {
-		firstContent := messages[0].Content.ExtractText()
+		firstContent := messages[len(messages)-1].Content.ExtractText()
 		lines := strings.SplitN(firstContent, "\n", 2)
 		firstLine := strings.TrimSpace(lines[0])
 
@@ -103,6 +108,11 @@ func (e *MockEndpoint) newMockParams(v *openai.ChatCompletionRequest) *mockParam
 				if v := vals.Get("input_len"); v != "" {
 					if n, err := strconv.Atoi(v); err == nil {
 						inputLen = n
+					}
+				}
+				if v := vals.Get("http_status"); v != "" {
+					if n, err := strconv.Atoi(v); err == nil {
+						p.httpStatus = n
 					}
 				}
 			}
@@ -180,6 +190,17 @@ func (e *MockEndpoint) Process(req *octollm.Request) (*octollm.Response, error) 
 	case *openai.ChatCompletionRequest:
 		p := e.newMockParams(v)
 		slog.InfoContext(req.Context(), "[mock-endpoint] params: "+p.String())
+		if p.httpStatus != 200 {
+			time.Sleep(p.ttft)
+			return nil, &errutils.UpstreamRespError{
+				StatusCode: p.httpStatus,
+				Header: http.Header{
+					"Content-Type":  {"application/json"},
+					"X-Mock-Params": {p.String()},
+				},
+				Body: []byte(fmt.Sprintf(`{"error":{"message":"mock error","type":"mock_error","code":%d}}`, p.httpStatus)),
+			}
+		}
 		if v.Stream != nil && *v.Stream {
 			return e.openAIStreamResponse(req, v, p)
 		}
