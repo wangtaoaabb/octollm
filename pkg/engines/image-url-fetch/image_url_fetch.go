@@ -189,6 +189,20 @@ func extractImageReplaceJobsFromBody(ctx context.Context, body *octollm.UnifiedB
 }
 
 func (e *ImageURLFetchEngine) Process(req *octollm.Request) (*octollm.Response, error) {
+	if req != nil && req.Body != nil {
+		body, err := req.Body.Bytes()
+		if err != nil {
+			return nil, fmt.Errorf("%w: get request body bytes error: %w", ErrImageURLFetch, err)
+		}
+		newBody, modified, nerr := normalizeRawOpenAIImageURLStrings(body)
+		if nerr != nil {
+			return nil, nerr
+		}
+		if modified {
+			req.Body.SetBytes(newBody)
+		}
+	}
+
 	jobs, err := extractImageReplaceJobsFromBody(req.Context(), req.Body)
 	if err != nil {
 		return nil, err
@@ -232,6 +246,9 @@ func (e *ImageURLFetchEngine) Process(req *octollm.Request) (*octollm.Response, 
 
 	for u, r := range result {
 		if r.err != nil {
+			if e.metrics != nil {
+				e.metrics.IncRejectedDueToImageDownload()
+			}
 			return nil, fmt.Errorf("%w: fetch image %q: %w", ErrImageURLFetch, u, r.err)
 		}
 	}

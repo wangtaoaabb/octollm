@@ -17,6 +17,7 @@ func TestNew_nilRegisterer(t *testing.T) {
 		m.ObserveHTTPFetchDuration(0)
 		m.IncHTTPFetches()
 		m.IncCacheHits()
+		m.IncRejectedDueToImageDownload()
 	})
 }
 
