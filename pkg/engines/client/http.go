@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,6 +50,17 @@ func redactSensitiveHeaders(h http.Header) {
 			h.Set(key, "[REDACTED]")
 		}
 	}
+}
+
+const maxIncomingRespDumpDebugLogBytes = 2000
+
+// truncateIncomingRespDumpForDebugLog caps httputil.DumpResponse bytes used only for the
+// "[http-endpoint] incoming response" debug log line (does not affect relayed bodies).
+func truncateIncomingRespDumpForDebugLog(dump []byte) string {
+	if len(dump) <= maxIncomingRespDumpDebugLogBytes {
+		return string(dump)
+	}
+	return string(dump[:maxIncomingRespDumpDebugLogBytes]) + " ... [truncated, total=" + strconv.Itoa(len(dump)) + " bytes]"
 }
 
 func GetClientRecvFirstChunkTime(req *octollm.Request) (time.Time, bool) {
@@ -156,6 +168,8 @@ func (e *HTTPEndpoint) Process(req *octollm.Request) (*octollm.Response, error) 
 
 	dumpReq := httpReq.Clone(httpReq.Context())
 	redactSensitiveHeaders(dumpReq.Header)
+	// Debug logs stringify parsed with fmt %v; payloads may be huge.
+	// Turn off debug logs, redact elsewhere, or extend this block for bounded output.
 	if reqDump, dumpErr := httputil.DumpRequestOut(dumpReq, false); dumpErr == nil {
 		slog.DebugContext(req.Context(), fmt.Sprintf("[http-endpoint] outgoing request:\n%s%v", string(reqDump), parsed))
 	}
@@ -172,7 +186,7 @@ func (e *HTTPEndpoint) Process(req *octollm.Request) (*octollm.Response, error) 
 		dumpRespBody = true
 	}
 	if respDump, dumpErr := httputil.DumpResponse(resp, dumpRespBody); dumpErr == nil {
-		slog.DebugContext(req.Context(), fmt.Sprintf("[http-endpoint] incoming response:\n%s", string(respDump)))
+		slog.DebugContext(req.Context(), fmt.Sprintf("[http-endpoint] incoming response:\n%s", truncateIncomingRespDumpForDebugLog(respDump)))
 	}
 
 	if resp.StatusCode != http.StatusOK {
