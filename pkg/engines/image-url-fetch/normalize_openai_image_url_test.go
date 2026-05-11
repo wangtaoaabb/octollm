@@ -55,8 +55,10 @@ func TestNormalizeRawOpenAIImageURLStrings_stringToObject_httpURL(t *testing.T) 
 	require.Equal(t, "https://example.com/a.png", img["url"])
 }
 
-// Pretty-printed JSON 常在冒号与值之间带空格；此前用 "\"image_url\":\"" 做 fast-path 会误判为「无需规范化」。
+// Pretty-printed JSON often has whitespace after colons; a fast-path that checks for "\"image_url\":\"" may incorrectly assume normalization is unnecessary.
 func TestNormalizeRawOpenAIImageURLStrings_stringToObject_httpURL_spacedAfterColon(t *testing.T) {
+	t.Parallel()
+
 	in := []byte(`{
   "model": "m",
   "messages": [
@@ -71,7 +73,15 @@ func TestNormalizeRawOpenAIImageURLStrings_stringToObject_httpURL_spacedAfterCol
 	out, mod, err := normalizeRawOpenAIImageURLStrings(in)
 	require.NoError(t, err)
 	require.True(t, mod)
-	require.Contains(t, string(out), `"image_url":{"url":"https://cdn.example.com/p.png"}`)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(out, &payload))
+	msgs := payload["messages"].([]interface{})
+	msg0 := msgs[0].(map[string]interface{})
+	content := msg0["content"].([]interface{})
+	part0 := content[0].(map[string]interface{})
+	img := part0["image_url"].(map[string]interface{})
+	require.Equal(t, "https://cdn.example.com/p.png", img["url"])
 }
 
 func TestNormalizeRawOpenAIImageURLStrings_stringToObject_dataURL(t *testing.T) {

@@ -13,9 +13,9 @@ type ContextKey string
 const errorKey ContextKey = "error"
 
 type HandlerError struct {
-	Err        error  // 原始错误
-	StatusCode int    // HTTP 状态码
-	Message    string // 对外显示的消息
+	Err        error  // wrapped error returned to middleware
+	StatusCode int    // HTTP status for the client response
+	Message    string // body/message written to the client
 }
 
 func (e *HandlerError) Error() string {
@@ -35,7 +35,7 @@ func WithError(r *http.Request, err error, status int, msg string) *http.Request
 	return WithHandlerError(r, NewHandlerError(err, status, msg))
 }
 
-// 创建错误实例的辅助函数
+// NewHandlerError builds a HandlerError for ErrorHandlingMiddleware.
 func NewHandlerError(err error, status int, msg string) *HandlerError {
 	return &HandlerError{
 		Err:        err,

@@ -69,7 +69,7 @@ func New(reg prometheus.Registerer) (*M, error) {
 		Help: "Successful Store.Get from the engine (disk hit, or IndexHTTPStore index hit; latter may still refetch via HTTP inside the store).",
 	})
 	rejectedDownload := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "image_url_fetch_requests_rejected_due_to_failed_image_download_total",
+		Name: "image_url_fetch_download_failed_rejects_total",
 		Help: "Requests not forwarded to the next engine because loading at least one remote image failed " +
 			"(non-2xx HTTP, timeout, body read error, per-URL byte cap during fetch, etc.).",
 	})
