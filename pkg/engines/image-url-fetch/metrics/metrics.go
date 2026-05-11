@@ -11,6 +11,8 @@
 //     IndexHTTPStore may still perform HTTP GET inside Get for telemetry/refetch; that is not counted on
 //     image_url_fetch_http_fetches_total. Use IndexHTTPStore’s own metrics (duration/decoded bytes there) if you need
 //     origin HTTP volume for that mode.
+//   - IncRejectedDueToImageDownload is incremented when Process returns an error after at least one
+//     remote image URL failed to load (HTTP error, timeout, per-URL cap, read error, etc.).
 package metrics
 
 import (
@@ -30,6 +32,8 @@ type M struct {
 	httpFetchMilliseconds prometheus.Histogram
 	httpFetchesTotal      prometheus.Counter
 	cacheHitsTotal        prometheus.Counter
+	// Requests that stop at this engine because a remote image could not be fetched (not size-sum policy after success).
+	rejectedDueToImageDownload prometheus.Counter
 }
 
 // New registers metrics on reg. If reg is nil, returns a no-op *M and nil error.
@@ -64,9 +68,14 @@ func New(reg prometheus.Registerer) (*M, error) {
 		Name: "image_url_fetch_cache_hits_total",
 		Help: "Successful Store.Get from the engine (disk hit, or IndexHTTPStore index hit; latter may still refetch via HTTP inside the store).",
 	})
+	rejectedDownload := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "image_url_fetch_requests_rejected_due_to_failed_image_download_total",
+		Help: "Requests not forwarded to the next engine because loading at least one remote image failed " +
+			"(non-2xx HTTP, timeout, body read error, per-URL byte cap during fetch, etc.).",
+	})
 
 	for _, c := range []prometheus.Collector{
-		decodedBytes, requestSum, httpMs, httpFetches, cacheHits,
+		decodedBytes, requestSum, httpMs, httpFetches, cacheHits, rejectedDownload,
 	} {
 		if err := reg.Register(c); err != nil {
 			return nil, err
@@ -74,11 +83,12 @@ func New(reg prometheus.Registerer) (*M, error) {
 	}
 
 	return &M{
-		decodedBytes:          decodedBytes,
-		requestSumBytes:       requestSum,
-		httpFetchMilliseconds: httpMs,
-		httpFetchesTotal:      httpFetches,
-		cacheHitsTotal:        cacheHits,
+		decodedBytes:               decodedBytes,
+		requestSumBytes:            requestSum,
+		httpFetchMilliseconds:      httpMs,
+		httpFetchesTotal:           httpFetches,
+		cacheHitsTotal:             cacheHits,
+		rejectedDueToImageDownload: rejectedDownload,
 	}, nil
 }
 
@@ -120,4 +130,12 @@ func (m *M) IncCacheHits() {
 		return
 	}
 	m.cacheHitsTotal.Inc()
+}
+
+// IncRejectedDueToImageDownload records one request that failed before Next because a remote image could not be fetched.
+func (m *M) IncRejectedDueToImageDownload() {
+	if m == nil || m.disabled {
+		return
+	}
+	m.rejectedDueToImageDownload.Inc()
 }

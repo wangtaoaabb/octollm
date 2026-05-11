@@ -98,6 +98,32 @@ func TestImageURLFetchEngine_inlineStringForm(t *testing.T) {
 	require.True(t, ok)
 	url := arr[0].ImageURL.GetImageUrl()
 	require.Contains(t, url, "data:image/png;base64,")
+	require.Contains(t, string(nextBody), `"image_url":{"url":`)
+}
+
+// String-form image_url (including data URLs) is normalized to {"url":...} in serialized body.
+func TestImageURLFetchEngine_normalizesStringImageURLToObjectForm_dataURL(t *testing.T) {
+	embeddedPNG := "data:image/png;base64,iVBORw0KGgo="
+	raw := []byte(fmt.Sprintf(`{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":%q}]}]}`, embeddedPNG))
+
+	var nextBody []byte
+	next := octollm.EngineFunc(func(req *octollm.Request) (*octollm.Response, error) {
+		b, err := req.Body.Bytes()
+		require.NoError(t, err)
+		nextBody = b
+		return octollm.NewNonStreamResponse(200, nil, octollm.NewBodyFromBytes([]byte(`{}`), nil)), nil
+	})
+
+	eng, err := NewImageURLFetchEngine(ImageURLFetchConfig{Next: next})
+	require.NoError(t, err)
+	u := octollm.NewRequest(httptest.NewRequest(http.MethodPost, "/", nil), octollm.APIFormatChatCompletions)
+	u.Body = octollm.NewBodyFromBytes(raw, testChatBodyParser)
+
+	_, err = eng.Process(u)
+	require.NoError(t, err)
+
+	require.Contains(t, string(nextBody), `"image_url":{"url":`)
+	require.Contains(t, string(nextBody), embeddedPNG)
 }
 
 // Non–chat-completion parsed body yields no jobs; request is passed to next unchanged.
