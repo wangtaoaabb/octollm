@@ -55,13 +55,19 @@ func NewTrafficReplicationEngine(targets []TrafficReplicationTarget, next octoll
 	}, nil
 }
 
-// CloneForReplication returns a deep copy of the request for fire-and-forget replication
-// with its own separate context. Exported fields (URL, Query, Header, Body) are copied.
-// Unexported fields: metadata is shared with the original (not deep-copied);
-// ctx is replaced with a new context that has a deadline.
-// If expiration <= 0, 10 minutes is used.
-// The returned cancel must be called when the clone is no longer needed to release the
-// context's timer (e.g., defer cancel() in the goroutine that processes the clone).
+// CloneForReplication returns a copy of the request suitable for asynchronous replication.
+// It builds a fresh Request via [octollm.NewEmptyRequest] (empty metadata, nil URL/Query/Header/Body—
+// no pointer sharing with the source for those fields), copies Method and Format from the source,
+// sets metadata [IsTrafficReplication] so nested replication engines do not fan out again, then
+// deep-copies URL, Query, Header, and Body (body bytes and a new UnifiedBody; Parser is reused).
+//
+// ctx wraps the source request's context: [IsDuplicateRequest] is set to true, parent cancellation
+// is not propagated ([context.WithoutCancel]), and a deadline is applied using expiration (or
+// [DefaultReplicationExpiration] if expiration <= 0). Other context values inherited from the
+// source remain visible to [context.Context.Value] unless shadowed.
+//
+// The returned cancel must be called when the clone is no longer needed (e.g. defer cancel() in
+// the goroutine that processes the clone) to release the deadline timer.
 func CloneForReplication(req *octollm.Request, expiration time.Duration) (clone *octollm.Request, cancel context.CancelFunc) {
 	if req == nil {
 		return nil, nil
@@ -72,7 +78,13 @@ func CloneForReplication(req *octollm.Request, expiration time.Duration) (clone 
 	ctx := context.WithValue(req.Context(), IsDuplicateRequest, true)
 	ctx = context.WithoutCancel(ctx)
 	ctx, cancel = context.WithDeadline(ctx, time.Now().Add(expiration))
-	clone = req.WithContext(ctx)
+
+	// only ctx + empty metadata; no shared URL/Header/Body with req until filled below.
+	clone = octollm.NewEmptyRequest(ctx)
+	clone.Method = req.Method
+	clone.Format = req.Format
+	// Mark so nested TrafficReplicationEngine on the duplicate chain does not replicate again.
+	clone.SetMetadataValue(IsTrafficReplication, true)
 
 	// Deep copy URL
 	if req.URL != nil {

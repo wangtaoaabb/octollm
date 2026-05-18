@@ -51,6 +51,29 @@ func TestCloneForReplication(t *testing.T) {
 		assert.GreaterOrEqual(t, time.Until(deadline), 9*time.Minute, "should use 10 min default")
 	})
 
+	t.Run("metadata: replication flag set; source metadata not copied", func(t *testing.T) {
+		req := newTestRequest(t)
+		const customKey = "traffic_replication_test_custom_meta"
+		req.SetMetadataValue(customKey, "source-only")
+
+		clone, cancel := CloneForReplication(req, time.Minute)
+		defer cancel()
+
+		assert.NotNil(t, clone)
+
+		v, ok := clone.GetMetadataValue(IsTrafficReplication)
+		assert.True(t, ok, "clone should carry IsTrafficReplication")
+		assert.Equal(t, true, v)
+
+		_, ok = clone.GetMetadataValue(customKey)
+		assert.False(t, ok, "clone must not inherit arbitrary source metadata")
+
+		_, ok = req.GetMetadataValue(customKey)
+		assert.True(t, ok, "source metadata unchanged")
+
+		assert.Equal(t, true, clone.Context().Value(IsDuplicateRequest))
+	})
+
 	t.Run("deep copy URL Query Header Body", func(t *testing.T) {
 		req := newTestRequest(t)
 		clone, cancel := CloneForReplication(req, time.Minute)

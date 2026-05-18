@@ -289,6 +289,20 @@ func NewRequest(r *http.Request, format APIFormat) *Request {
 	return u
 }
 
+// NewEmptyRequest returns a request with ctx and a new empty metadata map.
+// All other fields are zero: Method and Format are "", URL/Query/Header/Body are nil.
+// Callers that fork an existing request (e.g. traffic replication) should set Method, Format,
+// and deep-copy URL, Query, Header, and Body themselves.
+func NewEmptyRequest(ctx context.Context) *Request {
+	if ctx == nil {
+		panic("nil context")
+	}
+	return &Request{
+		ctx:      ctx,
+		metadata: &sync.Map{},
+	}
+}
+
 func (u *Request) Context() context.Context {
 	return u.ctx
 }
